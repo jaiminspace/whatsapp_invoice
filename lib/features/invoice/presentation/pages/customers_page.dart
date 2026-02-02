@@ -4,6 +4,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:whatsapp_invoice/features/invoice/presentation/state/customer_notifier.dart';
 
+import '../../../../core/ui/app_confirm_dialog.dart';
+import '../../../../core/ui/app_snack.dart';
+
 class CustomersPage extends ConsumerWidget {
   const CustomersPage({super.key});
 
@@ -71,11 +74,21 @@ class CustomersPage extends ConsumerWidget {
                 IconButton(
                   tooltip: 'Delete',
                   icon: const Icon(Icons.delete_outline),
-                  onPressed: () => ref
-                      .read(customerListProvider.notifier)
-                      .deleteCustomer(c.id),
-                ),
-              ],
+                  onPressed: () async {
+                    final ok = await AppConfirmDialog.show(
+                      context,
+                      title: 'Delete customer?',
+                      message: 'This customer will be permanently deleted.',
+                      confirmText: 'Delete',
+                      isDanger: true,
+                    );
+
+                    if (!ok) return;
+
+                    await ref.read(customerListProvider.notifier).deleteCustomer(c.id);
+                    if (context.mounted) AppSnack.show(context, 'Customer deleted');
+                  },)
+                  ],
             ),
           );
         },

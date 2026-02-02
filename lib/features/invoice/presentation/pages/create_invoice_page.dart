@@ -6,6 +6,7 @@ import 'package:whatsapp_invoice/features/invoice/presentation/state/customer_no
 import 'package:whatsapp_invoice/features/invoice/presentation/state/invoice_filter_provider.dart';
 import 'package:whatsapp_invoice/invoice_draft_notifier.dart';
 
+import '../../../../core/ui/app_confirm_dialog.dart';
 import '../../domain/business_profile.dart';
 import '../state/business_profile_notifier.dart';
 
@@ -241,19 +242,26 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
                 return;
               }
 
-              // ✅ Save invoice
+              final ok = await AppConfirmDialog.show(
+                context,
+                title: 'Save invoice?',
+                message:
+                'Total: ₹${draft.grandTotal.toStringAsFixed(2)}\n'
+                    'Customer: ${draft.customerName.isEmpty ? 'Customer' : draft.customerName}',
+                confirmText: 'Save',
+              );
+
+              if (!ok) return;
+
               await ref.read(invoiceListProvider.notifier).addFromDraft(draft);
 
-              // ✅ Save/Update customer book
               await ref.read(customerListProvider.notifier).upsertFromInvoice(
                 name: draft.customerName,
                 mobile: draft.customerMobile,
               );
 
-              // ✅ Reset draft + controllers
-              _resetDraft();
+              ref.read(invoiceDraftProvider.notifier).reset();
 
-              // ✅ Optional UX reset
               ref.read(invoiceFilterProvider.notifier).state = InvoiceFilter.all;
               ref.read(invoiceSearchProvider.notifier).state = '';
 
