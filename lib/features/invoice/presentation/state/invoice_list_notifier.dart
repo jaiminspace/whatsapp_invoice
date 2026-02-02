@@ -7,6 +7,10 @@ import 'package:uuid/uuid.dart';
 import 'package:whatsapp_invoice/features/invoice/data/invoice_local_repo.dart';
 import 'package:whatsapp_invoice/features/invoice/domain/invoice_models.dart';
 
+// ✅ Needed for manual/auto invoice number mode
+import '../state/business_profile_notifier.dart';
+import '../../domain/business_profile.dart';
+
 final invoiceRepoProvider = Provider<InvoiceLocalRepo>((ref) {
   final box = Hive.box('invoices');
   return InvoiceLocalRepo(box);
@@ -25,15 +29,13 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
   List<Invoice> build() {
     repo = ref.read(invoiceRepoProvider);
 
-    // ✅ Initial load (NEW list instance)
+    // Initial load
     final initial = List<Invoice>.from(repo.getAll());
 
-    // ✅ Auto refresh whenever Hive changes
+    // Auto-refresh when Hive changes
     final box = Hive.box('invoices');
-
     _sub?.cancel();
-    _sub = box.watch().listen((event) {
-      // ✅ VERY IMPORTANT: always create a NEW List instance
+    _sub = box.watch().listen((_) {
       state = List<Invoice>.from(repo.getAll());
     });
 
@@ -44,11 +46,50 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
     return initial;
   }
 
+  // ================= INVOICE NUMBERING =================
+
+  String _nextInvoiceNumber() {
+    final box = Hive.box('settings'); // ensure this box is opened in main
+    final last = box.get('invoice_counter', defaultValue: 0) as int;
+    final next = last + 1;
+    box.put('invoice_counter', next);
+
+    return 'INV-${next.toString().padLeft(4, '0')}';
+  }
+
+  bool _invoiceNumberExists(String invNo) {
+    final n = invNo.trim();
+    if (n.isEmpty) return false;
+    return state.any((e) => e.invoiceNumber.trim() == n);
+  }
+
+  // ================= CRUD =================
+
   Future<void> addFromDraft(InvoiceDraft draft) async {
     final id = const Uuid().v4();
 
+    final profile = ref.read(businessProfileProvider);
+    final isManual = profile.invoiceNumberMode == InvoiceNumberMode.manual;
+
+    String invoiceNumber;
+
+    if (isManual) {
+      final manual = draft.customInvoiceNumber.trim();
+
+      // If empty -> fallback to auto
+      invoiceNumber = manual.isEmpty ? _nextInvoiceNumber() : manual;
+
+      // If duplicate -> fallback to auto
+      if (_invoiceNumberExists(invoiceNumber)) {
+        invoiceNumber = _nextInvoiceNumber();
+      }
+    } else {
+      invoiceNumber = _nextInvoiceNumber();
+    }
+
     final invoice = Invoice(
       id: id,
+      invoiceNumber: invoiceNumber,
       createdAt: DateTime.now(),
       draft: draft,
       status: PaymentStatus.pending,
@@ -56,7 +97,7 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
 
     await repo.save(invoice);
 
-    // ✅ Extra safety: set state immediately (new list instance)
+    // Force new list instance (extra safety; Hive watch will also update)
     state = List<Invoice>.from(repo.getAll());
   }
 
@@ -73,6 +114,13 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
     );
 
     await repo.save(updated);
+    state = List<Invoice>.from(repo.getAll());
+  }
+
+  Future<void> importMany(List<Invoice> invoices) async {
+    for (final inv in invoices) {
+      await repo.save(inv);
+    }
     state = List<Invoice>.from(repo.getAll());
   }
 }

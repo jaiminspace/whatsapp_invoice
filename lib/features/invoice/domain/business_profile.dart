@@ -1,21 +1,27 @@
+enum InvoiceNumberMode { auto, manual }
+
 class BusinessProfile {
   final String name;
   final String phone;
   final String address;
   final String upiId;
 
+  final InvoiceNumberMode invoiceNumberMode;
+
   const BusinessProfile({
     required this.name,
     required this.phone,
     required this.address,
     required this.upiId,
+    required this.invoiceNumberMode,
   });
 
-  factory BusinessProfile.empty() => const BusinessProfile(
+  factory BusinessProfile.initial() => const BusinessProfile(
     name: 'My Business',
     phone: '',
     address: '',
     upiId: '',
+    invoiceNumberMode: InvoiceNumberMode.auto,
   );
 
   Map<String, dynamic> toJson() => {
@@ -23,15 +29,24 @@ class BusinessProfile {
     'phone': phone,
     'address': address,
     'upiId': upiId,
+    'invoiceNumberMode': invoiceNumberMode.toString().split('.').last, // web-safe
   };
 
-  factory BusinessProfile.fromJson(Map<dynamic, dynamic>? json) {
-    if (json == null) return BusinessProfile.empty();
+  factory BusinessProfile.fromJson(Map<dynamic, dynamic> json) {
+    final modeRaw = (json['invoiceNumberMode'] ?? 'auto').toString();
+    final modeValue = modeRaw.contains('.') ? modeRaw.split('.').last : modeRaw;
+
+    final mode = InvoiceNumberMode.values.firstWhere(
+          (e) => e.toString().split('.').last == modeValue,
+      orElse: () => InvoiceNumberMode.auto,
+    );
+
     return BusinessProfile(
-      name: (json['name'] ?? 'My Business') as String,
-      phone: (json['phone'] ?? '') as String,
-      address: (json['address'] ?? '') as String,
-      upiId: (json['upiId'] ?? '') as String,
+      name: (json['name'] ?? 'My Business').toString(),
+      phone: (json['phone'] ?? '').toString(),
+      address: (json['address'] ?? '').toString(),
+      upiId: (json['upiId'] ?? '').toString(),
+      invoiceNumberMode: mode,
     );
   }
 
@@ -40,12 +55,14 @@ class BusinessProfile {
     String? phone,
     String? address,
     String? upiId,
+    InvoiceNumberMode? invoiceNumberMode,
   }) {
     return BusinessProfile(
       name: name ?? this.name,
       phone: phone ?? this.phone,
       address: address ?? this.address,
       upiId: upiId ?? this.upiId,
+      invoiceNumberMode: invoiceNumberMode ?? this.invoiceNumberMode,
     );
   }
 }

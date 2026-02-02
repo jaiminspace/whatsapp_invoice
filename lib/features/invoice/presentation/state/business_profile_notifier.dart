@@ -8,19 +8,21 @@ NotifierProvider<BusinessProfileNotifier, BusinessProfile>(
 );
 
 class BusinessProfileNotifier extends Notifier<BusinessProfile> {
-  late final Box settingsBox;
-
-  static const _key = 'business_profile';
+  late final Box _box;
 
   @override
   BusinessProfile build() {
-    settingsBox = Hive.box('settings');
-    final raw = settingsBox.get(_key);
-    return BusinessProfile.fromJson(raw is Map ? raw : null);
+    _box = Hive.box('settings');
+    final raw = _box.get('business_profile');
+
+    if (raw is Map) {
+      return BusinessProfile.fromJson(raw);
+    }
+    return BusinessProfile.initial();
   }
 
   Future<void> save(BusinessProfile profile) async {
-    await settingsBox.put(_key, profile.toJson());
     state = profile;
+    await _box.put('business_profile', profile.toJson());
   }
 }

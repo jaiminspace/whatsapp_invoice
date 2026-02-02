@@ -15,14 +15,14 @@ class InvoiceDetailPage extends ConsumerWidget {
 
   String _shareCaption({
     required String customerName,
-    required String shortId,
+    required String invoiceNo,
     required double total,
     required String businessName,
     required bool hasUpi,
   }) {
     final name = customerName.isEmpty ? 'Customer' : customerName;
     final base =
-        'Hi $name, here is your invoice (INV-$shortId) from $businessName. Total: ₹${total.toStringAsFixed(2)}.';
+        'Hi $name, here is your invoice ($invoiceNo) from $businessName. Total: ₹${total.toStringAsFixed(2)}.';
     if (!hasUpi) return '$base Thank you!';
     return '$base I’m sharing the invoice PDF with payment QR inside. You can scan and pay using any UPI app. Thank you!';
   }
@@ -43,14 +43,19 @@ class InvoiceDetailPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final profile = ref.watch(businessProfileProvider);
+
     final dateStr = DateFormat('dd MMM yyyy, hh:mm a').format(invoice.createdAt);
     final shortId = invoice.id.substring(0, 8).toUpperCase();
+
+    // ✅ Prefer stored invoiceNumber, fallback for old invoices
+    final invoiceNo =
+    (invoice.invoiceNumber.trim().isEmpty) ? 'INV-$shortId' : invoice.invoiceNumber.trim();
 
     final hasUpi = profile.upiId.trim().isNotEmpty;
 
     final caption = _shareCaption(
       customerName: invoice.draft.customerName,
-      shortId: shortId,
+      invoiceNo: invoiceNo,
       total: invoice.total,
       businessName: profile.name,
       hasUpi: hasUpi,
@@ -68,7 +73,7 @@ class InvoiceDetailPage extends ConsumerWidget {
                     ? 'Customer'
                     : invoice.draft.customerName,
               ),
-              subtitle: Text('INV-$shortId • Created: $dateStr'),
+              subtitle: Text('$invoiceNo • Created: $dateStr'),
               trailing: Text(
                 '₹${invoice.total.toStringAsFixed(0)}',
                 style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
@@ -163,7 +168,7 @@ class InvoiceDetailPage extends ConsumerWidget {
 
               await Printing.sharePdf(
                 bytes: bytes,
-                filename: 'invoice_$shortId.pdf',
+                filename: '${invoiceNo}_invoice.pdf',
               );
             },
           ),
@@ -182,7 +187,7 @@ class InvoiceDetailPage extends ConsumerWidget {
                   businessAddress: profile.address,
                   upiId: profile.upiId,
                 ),
-                name: 'invoice_$shortId',
+                name: '${invoiceNo}_invoice',
               );
             },
           ),
@@ -199,18 +204,21 @@ class InvoiceDetailPage extends ConsumerWidget {
             label: const Text('Send WhatsApp Message'),
             onPressed: () => _openWhatsApp(caption),
           ),
+
           const SizedBox(height: 8),
+
           FilledButton(
             onPressed: () async {
               await ref.read(invoiceListProvider.notifier).togglePaymentStatus(invoice);
               Navigator.pop(context);
-              // ✅ tell list to refresh
             },
             child: Text(
               invoice.status == PaymentStatus.paid ? 'Mark as Pending' : 'Mark as Paid',
             ),
           ),
+
           const SizedBox(height: 8),
+
           Text(
             hasUpi
                 ? 'Tip: Share the PDF first (it contains the payment QR). Then send the WhatsApp message for context.'

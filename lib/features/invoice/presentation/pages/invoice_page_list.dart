@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
@@ -34,12 +37,10 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
       MaterialPageRoute(builder: (_) => const CreateInvoicePage()),
     );
 
-    // ✅ Optional UX: after coming back, reset filter/search so user sees All
+    // Optional UX: reset filter/search so user sees All
     _searchCtrl.clear();
     ref.read(invoiceSearchProvider.notifier).state = '';
     ref.read(invoiceFilterProvider.notifier).state = InvoiceFilter.all;
-
-    // ✅ No reload/invalidate needed because invoiceListProvider watches Hive changes
   }
 
   Future<void> _openDetail(Invoice inv) async {
@@ -47,8 +48,6 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
       context,
       MaterialPageRoute(builder: (_) => InvoiceDetailPage(invoice: inv)),
     );
-
-    // ✅ No reload/invalidate needed because invoiceListProvider watches Hive changes
   }
 
   @override
@@ -83,7 +82,7 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
             tooltip: 'Export CSV',
             icon: const Icon(Icons.download),
             onPressed: () async {
-              final allInvoices = ref.read(invoiceListProvider); // export ALL (not filtered)
+              final allInvoices = ref.read(invoiceListProvider); // export ALL
               if (allInvoices.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('No invoices to export')),
@@ -92,9 +91,19 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
               }
 
               final csv = invoicesToCsv(allInvoices);
-              await Share.share(
-                csv,
-                subject: 'Invoices Export (CSV)',
+
+              // ✅ IMPORTANT: use utf8.encode (web-safe)
+              final bytes = Uint8List.fromList(utf8.encode(csv));
+
+              final file = XFile.fromData(
+                bytes,
+                name: 'invoices_export.csv',
+                mimeType: 'text/csv',
+              );
+
+              await Share.shareXFiles(
+                [file],
+                text: 'Invoices export (CSV)',
               );
             },
           ),
@@ -115,8 +124,7 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
                 prefixIcon: Icon(Icons.search),
                 border: OutlineInputBorder(),
               ),
-              onChanged: (v) =>
-              ref.read(invoiceSearchProvider.notifier).state = v,
+              onChanged: (v) => ref.read(invoiceSearchProvider.notifier).state = v,
             ),
           ),
           Padding(
@@ -141,9 +149,8 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
                 ChoiceChip(
                   label: const Text('Paid'),
                   selected: filter == InvoiceFilter.paid,
-                  onSelected: (_) => ref
-                      .read(invoiceFilterProvider.notifier)
-                      .state = InvoiceFilter.paid,
+                  onSelected: (_) =>
+                  ref.read(invoiceFilterProvider.notifier).state = InvoiceFilter.paid,
                 ),
               ],
             ),
@@ -164,11 +171,17 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final inv = invoices[index];
+
+                final invNo = inv.invoiceNumber.trim().isEmpty
+                    ? 'INV-${inv.id.substring(0, 8).toUpperCase()}'
+                    : inv.invoiceNumber.trim();
+
+                final customer =
+                inv.draft.customerName.isEmpty ? 'Customer' : inv.draft.customerName;
+
                 return ListTile(
                   onTap: () => _openDetail(inv),
-                  title: Text(inv.draft.customerName.isEmpty
-                      ? 'Customer'
-                      : inv.draft.customerName),
+                  title: Text('$invNo • $customer'),
                   subtitle: Text(
                     '${inv.draft.items.length} items • ${inv.draft.customerMobile}',
                     maxLines: 1,
@@ -183,13 +196,11 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
                         children: [
                           Text(
                             '₹${inv.total.toStringAsFixed(0)}',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold),
+                            style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(height: 4),
                           Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                             decoration: BoxDecoration(
                               color: inv.status == PaymentStatus.paid
                                   ? Colors.green.shade100
@@ -197,9 +208,7 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(
-                              inv.status == PaymentStatus.paid
-                                  ? 'PAID'
-                                  : 'PENDING',
+                              inv.status == PaymentStatus.paid ? 'PAID' : 'PENDING',
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,

@@ -9,7 +9,9 @@ NotifierProvider<InvoiceDraftNotifier, InvoiceDraft>(
 
 class InvoiceDraftNotifier extends Notifier<InvoiceDraft> {
   @override
-  InvoiceDraft build() => InvoiceDraft.empty();
+  InvoiceDraft build() => InvoiceDraft.initial();
+
+  // ---------------- CUSTOMER ----------------
 
   void setCustomerName(String v) {
     state = state.copyWith(customerName: v.trim());
@@ -19,8 +21,19 @@ class InvoiceDraftNotifier extends Notifier<InvoiceDraft> {
     state = state.copyWith(customerMobile: v.trim());
   }
 
+  // ---------------- MANUAL INVOICE NUMBER ----------------
+
+  void setCustomInvoiceNumber(String v) {
+    state = state.copyWith(customInvoiceNumber: v.trim());
+  }
+
+  // ---------------- ITEMS ----------------
+
   void addItem() {
-    final updated = [...state.items, const InvoiceItem(name: '', qty: 1, price: 0)];
+    final updated = [
+      ...state.items,
+      const InvoiceItem(name: '', qty: 1, price: 0),
+    ];
     state = state.copyWith(items: updated);
   }
 
@@ -36,16 +49,24 @@ class InvoiceDraftNotifier extends Notifier<InvoiceDraft> {
   }
 
   void updateItemQty(int index, int qty) {
+    final safeQty = qty < 1 ? 1 : qty;
     final updated = [...state.items];
-    updated[index] = updated[index].copyWith(qty: qty < 1 ? 1 : qty);
+    updated[index] = updated[index].copyWith(qty: safeQty);
     state = state.copyWith(items: updated);
   }
 
   void updateItemPrice(int index, double price) {
+    final safePrice = price < 0 ? 0.0 : price;
+
     final updated = [...state.items];
-    updated[index] = updated[index].copyWith(price: price < 0 ? 0 : price);
+    updated[index] = updated[index].copyWith(price: safePrice);
     state = state.copyWith(items: updated);
   }
 
-  void reset() => state = InvoiceDraft.empty();
+
+  // ---------------- RESET ----------------
+
+  void reset() {
+    state = InvoiceDraft.initial();
+  }
 }

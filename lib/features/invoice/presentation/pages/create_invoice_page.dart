@@ -6,29 +6,68 @@ import 'package:whatsapp_invoice/features/invoice/presentation/state/customer_no
 import 'package:whatsapp_invoice/features/invoice/presentation/state/invoice_filter_provider.dart';
 import 'package:whatsapp_invoice/invoice_draft_notifier.dart';
 
-class CreateInvoicePage extends ConsumerWidget {
+import '../../domain/business_profile.dart';
+import '../state/business_profile_notifier.dart';
+
+class CreateInvoicePage extends ConsumerStatefulWidget {
   const CreateInvoicePage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CreateInvoicePage> createState() => _CreateInvoicePageState();
+}
+
+class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _mobileCtrl;
+  late final TextEditingController _manualInvCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final draft = ref.read(invoiceDraftProvider);
+    _nameCtrl = TextEditingController(text: draft.customerName);
+    _mobileCtrl = TextEditingController(text: draft.customerMobile);
+    _manualInvCtrl = TextEditingController(text: draft.customInvoiceNumber);
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _mobileCtrl.dispose();
+    _manualInvCtrl.dispose();
+    super.dispose();
+  }
+
+  void _resetDraft() {
+    ref.read(invoiceDraftProvider.notifier).reset();
+    _nameCtrl.text = '';
+    _mobileCtrl.text = '';
+    _manualInvCtrl.text = '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final draft = ref.watch(invoiceDraftProvider);
     final notifier = ref.read(invoiceDraftProvider.notifier);
+
+    final profile = ref.watch(businessProfileProvider);
+    final isManual = profile.invoiceNumberMode == InvoiceNumberMode.manual;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Create Invoice'),
         actions: [
           IconButton(
-            onPressed: notifier.reset,
+            onPressed: _resetDraft,
             icon: const Icon(Icons.refresh),
             tooltip: 'Reset',
-          )
+          ),
         ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // ✅ Customer quick picker (optional UI)
+          // ✅ Customer quick picker
           OutlinedButton.icon(
             icon: const Icon(Icons.person_search),
             label: const Text('Choose Customer'),
@@ -39,35 +78,49 @@ class CreateInvoicePage extends ConsumerWidget {
               );
 
               if (selected != null) {
-                notifier.setCustomerName(selected['name'] ?? '');
-                notifier.setCustomerMobile(selected['mobile'] ?? '');
+                final name = selected['name'] ?? '';
+                final mobile = selected['mobile'] ?? '';
+
+                notifier.setCustomerName(name);
+                notifier.setCustomerMobile(mobile);
+
+                _nameCtrl.text = name;
+                _mobileCtrl.text = mobile;
               }
             },
           ),
           const SizedBox(height: 12),
 
+          // ✅ Manual invoice number (only when mode = manual)
+          if (isManual) ...[
+            TextField(
+              controller: _manualInvCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Invoice Number (Manual)',
+                border: OutlineInputBorder(),
+                hintText: 'e.g. JM-101',
+              ),
+              onChanged: notifier.setCustomInvoiceNumber,
+            ),
+            const SizedBox(height: 12),
+          ],
+
           TextField(
+            controller: _nameCtrl,
             decoration: const InputDecoration(
               labelText: 'Customer name',
               border: OutlineInputBorder(),
             ),
-            controller: TextEditingController(text: draft.customerName)
-              ..selection = TextSelection.fromPosition(
-                TextPosition(offset: draft.customerName.length),
-              ),
             onChanged: notifier.setCustomerName,
           ),
           const SizedBox(height: 12),
 
           TextField(
+            controller: _mobileCtrl,
             decoration: const InputDecoration(
               labelText: 'Customer mobile',
               border: OutlineInputBorder(),
             ),
-            controller: TextEditingController(text: draft.customerMobile)
-              ..selection = TextSelection.fromPosition(
-                TextPosition(offset: draft.customerMobile.length),
-              ),
             keyboardType: TextInputType.phone,
             onChanged: notifier.setCustomerMobile,
           ),
@@ -117,7 +170,7 @@ class CreateInvoicePage extends ConsumerWidget {
                         IconButton(
                           onPressed: () => notifier.removeItem(index),
                           icon: const Icon(Icons.delete_outline),
-                        )
+                        ),
                       ],
                     ),
                     const SizedBox(height: 10),
@@ -160,7 +213,7 @@ class CreateInvoicePage extends ConsumerWidget {
                         const Text('Item total'),
                         Text('₹${item.total.toStringAsFixed(2)}'),
                       ],
-                    )
+                    ),
                   ],
                 ),
               ),
@@ -197,17 +250,17 @@ class CreateInvoicePage extends ConsumerWidget {
                 mobile: draft.customerMobile,
               );
 
-              // ✅ Reset draft
-              ref.read(invoiceDraftProvider.notifier).reset();
+              // ✅ Reset draft + controllers
+              _resetDraft();
 
-              // ✅ Optional UX: reset list filter/search (not required)
+              // ✅ Optional UX reset
               ref.read(invoiceFilterProvider.notifier).state = InvoiceFilter.all;
               ref.read(invoiceSearchProvider.notifier).state = '';
 
-              if (context.mounted) Navigator.pop(context); // ✅ no true
+              if (context.mounted) Navigator.pop(context);
             },
             child: const Text('Save Invoice'),
-          )
+          ),
         ],
       ),
     );
