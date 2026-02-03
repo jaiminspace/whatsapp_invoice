@@ -14,7 +14,7 @@ void main() async {
 
   // ✅ NEW boxes for multi business + item catalog
   await Hive.openBox('businesses');
-  await Hive.openBox('catalog');
+  await Hive.openBox('catalog_items');
 
   runApp(const ProviderScope(child: MyApp()));
 }

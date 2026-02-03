@@ -1,12 +1,13 @@
 import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive/hive.dart';
 
-import 'package:whatsapp_invoice/features/invoice/data/customer_local_repo.dart';
-import 'package:whatsapp_invoice/features/invoice/domain/customer_model.dart';
+import '../../data/customer_local_repo.dart';
+import '../../domain/customer_model.dart';
 
 final customerRepoProvider = Provider<CustomerLocalRepo>((ref) {
-  final box = Hive.box('customers');
+  final box = Hive.box('customers'); // MUST be opened in main()
   return CustomerLocalRepo(box);
 });
 
@@ -25,6 +26,8 @@ class CustomerListNotifier extends Notifier<List<Customer>> {
 
     final box = Hive.box('customers');
 
+    final initial = List<Customer>.from(repo.getAll());
+
     _sub?.cancel();
     _sub = box.watch().listen((_) {
       state = List<Customer>.from(repo.getAll());
@@ -32,9 +35,10 @@ class CustomerListNotifier extends Notifier<List<Customer>> {
 
     ref.onDispose(() => _sub?.cancel());
 
-    return List<Customer>.from(repo.getAll());
+    return initial;
   }
 
+  /// Upsert from invoice (mobile is the id)
   Future<void> upsertFromInvoice({
     required String name,
     required String mobile,
@@ -42,14 +46,55 @@ class CustomerListNotifier extends Notifier<List<Customer>> {
     final m = mobile.trim();
     if (m.isEmpty) return;
 
-    final c = Customer(
+    final customer = Customer(
+      id: m, // ✅ mobile as unique id
+      name: name.trim(),
+      mobile: m,
+      updatedAt: DateTime.now(),
+    );
+
+    await repo.upsert(customer);
+    state = List<Customer>.from(repo.getAll());
+  }
+
+  /// Add customer manually
+  Future<void> addCustomer({
+    required String name,
+    required String mobile,
+  }) async {
+    final m = mobile.trim();
+    if (m.isEmpty) return;
+
+    final customer = Customer(
       id: m,
       name: name.trim(),
       mobile: m,
       updatedAt: DateTime.now(),
     );
 
-    await repo.upsert(c);
+    // ✅ use upsert (repo.save doesn't exist in your repo)
+    await repo.upsert(customer);
+    state = List<Customer>.from(repo.getAll());
+  }
+
+  /// Update customer
+  Future<void> updateCustomer({
+    required String id,
+    required String name,
+    required String mobile,
+  }) async {
+    final m = mobile.trim();
+    if (m.isEmpty) return;
+
+    // ✅ avoid copyWith(mobile: ...) because your copyWith may not support it
+    final updated = Customer(
+      id: id, // keep same id
+      name: name.trim(),
+      mobile: m,
+      updatedAt: DateTime.now(),
+    );
+
+    await repo.upsert(updated);
     state = List<Customer>.from(repo.getAll());
   }
 
