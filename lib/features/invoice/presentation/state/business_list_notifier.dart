@@ -1,84 +1,118 @@
 import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:hive/hive.dart';
-import 'package:uuid/uuid.dart';
-import '../../domain/business_models.dart';
+
+import '../../domain/business_entity.dart';
 import '../../data/business_local_repo.dart';
 
+/// --------------------
+/// Repository Provider
+/// --------------------
 final businessRepoProvider = Provider<BusinessLocalRepo>((ref) {
-  final box = Hive.box('businesses');
+  final box = Hive.box('businesses'); // MUST be opened in main()
   return BusinessLocalRepo(box);
 });
 
+/// --------------------
+/// Business List Provider
+/// --------------------
 final businessListProvider =
-NotifierProvider<BusinessListNotifier, List<Business>>(
+NotifierProvider<BusinessListNotifier, List<BusinessEntity>>(
   BusinessListNotifier.new,
 );
 
+/// --------------------
+/// Selected Business ID
+/// --------------------
 final selectedBusinessIdProvider = StateProvider<String>((ref) => '');
 
-final selectedBusinessProvider = Provider<Business?>((ref) {
+/// --------------------
+/// Selected Business (derived)
+/// --------------------
+final selectedBusinessProvider = Provider<BusinessEntity?>((ref) {
   final list = ref.watch(businessListProvider);
   final selectedId = ref.watch(selectedBusinessIdProvider);
+
   if (list.isEmpty) return null;
-  if (selectedId.trim().isEmpty) return list.first; // default
+
+  if (selectedId.trim().isEmpty) {
+    return list.first; // default business
+  }
+
   return list.firstWhere(
         (b) => b.id == selectedId,
     orElse: () => list.first,
   );
 });
 
-class BusinessListNotifier extends Notifier<List<Business>> {
+/// --------------------
+/// Notifier
+/// --------------------
+class BusinessListNotifier extends Notifier<List<BusinessEntity>> {
   late final BusinessLocalRepo repo;
   StreamSubscription? _sub;
 
   @override
-  List<Business> build() {
+  List<BusinessEntity> build() {
     repo = ref.read(businessRepoProvider);
-    final initial = List<Business>.from(repo.getAll());
+
+    final initial = List<BusinessEntity>.from(repo.getAll());
 
     final box = Hive.box('businesses');
     _sub?.cancel();
     _sub = box.watch().listen((_) {
-      state = List<Business>.from(repo.getAll());
+      state = List<BusinessEntity>.from(repo.getAll());
     });
 
     ref.onDispose(() => _sub?.cancel());
+
     return initial;
   }
 
-  Future<void> addBusiness({
-    required String name,
-    required String phone,
-    required String address,
-    required String upiId,
-  }) async {
-    final id = const Uuid().v4();
-    final b = Business(
-      id: id,
-      name: name.trim(),
-      phone: phone.trim(),
-      address: address.trim(),
-      upiId: upiId.trim(),
-    );
-    await repo.save(b);
-    state = List<Business>.from(repo.getAll());
+  /// --------------------
+  /// Helpers
+  /// --------------------
+  BusinessEntity getById(String id) {
+    if (state.isEmpty) {
+      throw StateError('No businesses available. Add a business first.');
+    }
 
-    // auto-select first business if none selected yet
+    return state.firstWhere(
+          (b) => b.id == id,
+      orElse: () => state.first,
+    );
+  }
+
+  /// --------------------
+  /// CRUD
+  /// --------------------
+  Future<void> add(BusinessEntity business) async {
+    await repo.save(business);
+    state = List<BusinessEntity>.from(repo.getAll());
+
+    // Auto-select first business if none selected yet
     final selected = ref.read(selectedBusinessIdProvider);
     if (selected.trim().isEmpty) {
-      ref.read(selectedBusinessIdProvider.notifier).state = id;
+      ref.read(selectedBusinessIdProvider.notifier).state = business.id;
     }
   }
 
-  Future<void> updateBusiness(Business b) async {
-    await repo.save(b);
-    state = List<Business>.from(repo.getAll());
+  Future<void> update(BusinessEntity business) async {
+    await repo.save(business);
+    state = List<BusinessEntity>.from(repo.getAll());
   }
 
-  Future<void> deleteBusiness(String id) async {
+  Future<void> delete(String id) async {
     await repo.delete(id);
-    state = List<Business>.from(repo.getAll());
+    state = List<BusinessEntity>.from(repo.getAll());
+
+    // If deleted business was selected → reset selection
+    final selected = ref.read(selectedBusinessIdProvider);
+    if (selected == id) {
+      ref.read(selectedBusinessIdProvider.notifier).state =
+      state.isNotEmpty ? state.first.id : '';
+    }
   }
 }

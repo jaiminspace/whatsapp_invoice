@@ -18,15 +18,14 @@ class InvoiceDraftNotifier extends Notifier<InvoiceDraft> {
   void setCustomerMobile(String v) =>
       state = state.copyWith(customerMobile: v.trim());
 
-  // ✅ Custom invoice number (manual mode)
   void setCustomInvoiceNumber(String v) =>
       state = state.copyWith(customInvoiceNumber: v.trim());
 
-  // ✅ Date & time
   void setInvoiceDateTime(DateTime dt) =>
       state = state.copyWith(invoiceDateTime: dt);
 
-  // ================= Items =================
+  // ✅ NEW: business id support
+  void setBusinessId(String id) => state = state.copyWith(businessId: id);
 
   void addItem() {
     final updated = [
@@ -53,7 +52,6 @@ class InvoiceDraftNotifier extends Notifier<InvoiceDraft> {
   void updateItemQty(int index, int v) {
     final updated = [...state.items];
     if (index < 0 || index >= updated.length) return;
-
     final safeQty = v < 1 ? 1 : v;
     updated[index] = updated[index].copyWith(qty: safeQty);
     state = state.copyWith(items: updated);
@@ -62,11 +60,8 @@ class InvoiceDraftNotifier extends Notifier<InvoiceDraft> {
   void updateItemPrice(int index, double v) {
     final updated = [...state.items];
     if (index < 0 || index >= updated.length) return;
-
     final safePrice = v < 0 ? 0.0 : v;
     updated[index] = updated[index].copyWith(price: safePrice);
     state = state.copyWith(items: updated);
   }
-
-  void setBusinessId(String id) => state = state.copyWith(businessId: id);
 }

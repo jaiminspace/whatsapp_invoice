@@ -10,6 +10,7 @@ import 'package:whatsapp_invoice/features/invoice/domain/invoice_models.dart';
 // ✅ Needed for manual/auto invoice number mode
 import '../state/business_profile_notifier.dart';
 import '../../domain/business_profile.dart';
+import 'business_list_notifier.dart';
 
 final invoiceRepoProvider = Provider<InvoiceLocalRepo>((ref) {
   final box = Hive.box('invoices');
@@ -68,38 +69,34 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
   Future<void> addFromDraft(InvoiceDraft draft) async {
     final id = const Uuid().v4();
 
-    final profile = ref.read(businessProfileProvider);
-    final isManual = profile.invoiceNumberMode == InvoiceNumberMode.manual;
+    final business =
+    ref.read(businessListProvider.notifier).getById(draft.businessId);
 
     String invoiceNumber;
 
-    if (isManual) {
-      final manual = draft.customInvoiceNumber.trim();
-
-      // If empty -> fallback to auto
-      invoiceNumber = manual.isEmpty ? _nextInvoiceNumber() : manual;
-
-      // If duplicate -> fallback to auto
-      if (_invoiceNumberExists(invoiceNumber)) {
-        invoiceNumber = _nextInvoiceNumber();
-      }
+    if (business.invoiceNumberMode == InvoiceNumberMode.manual) {
+      invoiceNumber = draft.customInvoiceNumber;
     } else {
-      invoiceNumber = _nextInvoiceNumber();
+      final next = business.invoiceCounter + 1;
+      invoiceNumber = 'INV-${next.toString().padLeft(4, '0')}';
+
+      ref.read(businessListProvider.notifier).update(
+        business.copyWith(invoiceCounter: next),
+      );
     }
 
     final invoice = Invoice(
       id: id,
-      invoiceNumber: invoiceNumber,
       createdAt: draft.invoiceDateTime,
       draft: draft,
+      invoiceNumber: invoiceNumber,
       status: PaymentStatus.pending,
     );
 
     await repo.save(invoice);
-
-    // Force new list instance (extra safety; Hive watch will also update)
-    state = List<Invoice>.from(repo.getAll());
+    state = List.from(repo.getAll());
   }
+
 
   Future<void> deleteInvoice(String id) async {
     await repo.delete(id);

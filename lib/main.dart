@@ -1,18 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:hive_flutter/adapters.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 import 'app.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter();
-  await Hive.openBox('invoices'); // our local DB box
-  await Hive.openBox('settings');
+
+  await Hive.openBox('invoices');
   await Hive.openBox('customers');
+  await Hive.openBox('settings');
+
+  // ✅ NEW boxes for multi business + item catalog
   await Hive.openBox('businesses');
-  await Hive.openBox('catalog_items');
+  await Hive.openBox('catalog');
 
-  runApp(ProviderScope(child: const MyApp()));
+  runApp(const ProviderScope(child: MyApp()));
 }
-
