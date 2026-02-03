@@ -10,6 +10,8 @@ void main() async {
   await Hive.openBox('invoices'); // our local DB box
   await Hive.openBox('settings');
   await Hive.openBox('customers');
+  await Hive.openBox('businesses');
+  await Hive.openBox('catalog_items');
 
   runApp(ProviderScope(child: const MyApp()));
 }

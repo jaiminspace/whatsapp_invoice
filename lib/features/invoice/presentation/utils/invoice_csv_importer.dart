@@ -1,5 +1,4 @@
-import 'dart:convert';
-
+import 'dart:convert'; // ✅ for LineSplitter
 import 'package:whatsapp_invoice/features/invoice/domain/invoice_models.dart';
 
 String _enumFromString(String s) => s.trim().toLowerCase();
@@ -78,27 +77,28 @@ List<Invoice> importInvoicesFromCsvText(String csvText) {
     final totalStr = r[6].trim();
 
     final createdAt = DateTime.tryParse(dateStr) ?? DateTime.now();
-    final total = double.tryParse(totalStr) ?? 0;
+    final total = double.tryParse(totalStr) ?? 0.0;
 
     final draft = InvoiceDraft(
       customerName: name,
       customerMobile: mobile,
       items: [
-        // CSV does not contain item details
         InvoiceItem(
           name: 'Imported Total',
           qty: 1,
-          price: total.toDouble(),
+          price: total,
         ),
       ],
-      customInvoiceNumber: '', // ✅ REQUIRED (CSV has none)
+      customInvoiceNumber: '',
+      invoiceDateTime: createdAt,
+      businessId: '', // ✅ REQUIRED (CSV has no business info)
     );
 
     invoices.add(
       Invoice(
         id: id.isEmpty ? _fallbackId() : id,
         invoiceNumber: '', // CSV does not include invoice number
-        createdAt: createdAt,
+        createdAt: createdAt, // ✅ this drives sorting/grouping
         draft: draft,
         status: _parsePaymentStatus(statusStr),
       ),

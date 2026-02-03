@@ -90,7 +90,7 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
     final invoice = Invoice(
       id: id,
       invoiceNumber: invoiceNumber,
-      createdAt: DateTime.now(),
+      createdAt: draft.invoiceDateTime,
       draft: draft,
       status: PaymentStatus.pending,
     );

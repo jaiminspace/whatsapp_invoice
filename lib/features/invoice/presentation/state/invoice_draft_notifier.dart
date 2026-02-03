@@ -8,42 +8,65 @@ NotifierProvider<InvoiceDraftNotifier, InvoiceDraft>(
 
 class InvoiceDraftNotifier extends Notifier<InvoiceDraft> {
   @override
-  InvoiceDraft build() => InvoiceDraft.initial();
+  InvoiceDraft build() => InvoiceDraft.empty();
 
-  void reset() => state = InvoiceDraft.initial();
+  void reset() => state = InvoiceDraft.empty();
 
-  void setCustomerName(String v) => state = state.copyWith(customerName: v);
-  void setCustomerMobile(String v) => state = state.copyWith(customerMobile: v);
+  void setCustomerName(String v) =>
+      state = state.copyWith(customerName: v.trim());
 
-  // ✅ NEW
+  void setCustomerMobile(String v) =>
+      state = state.copyWith(customerMobile: v.trim());
+
+  // ✅ Custom invoice number (manual mode)
   void setCustomInvoiceNumber(String v) =>
-      state = state.copyWith(customInvoiceNumber: v);
+      state = state.copyWith(customInvoiceNumber: v.trim());
+
+  // ✅ Date & time
+  void setInvoiceDateTime(DateTime dt) =>
+      state = state.copyWith(invoiceDateTime: dt);
+
+  // ================= Items =================
 
   void addItem() {
-    final updated = [...state.items, const InvoiceItem(name: '', qty: 1, price: 0)];
+    final updated = [
+      ...state.items,
+      const InvoiceItem(name: '', qty: 1, price: 0),
+    ];
     state = state.copyWith(items: updated);
   }
 
   void removeItem(int index) {
-    final updated = [...state.items]..removeAt(index);
+    final updated = [...state.items];
+    if (index < 0 || index >= updated.length) return;
+    updated.removeAt(index);
     state = state.copyWith(items: updated);
   }
 
   void updateItemName(int index, String v) {
     final updated = [...state.items];
-    updated[index] = updated[index].copyWith(name: v);
+    if (index < 0 || index >= updated.length) return;
+    updated[index] = updated[index].copyWith(name: v.trim());
     state = state.copyWith(items: updated);
   }
 
   void updateItemQty(int index, int v) {
     final updated = [...state.items];
-    updated[index] = updated[index].copyWith(qty: v);
+    if (index < 0 || index >= updated.length) return;
+
+    final safeQty = v < 1 ? 1 : v;
+    updated[index] = updated[index].copyWith(qty: safeQty);
     state = state.copyWith(items: updated);
   }
 
   void updateItemPrice(int index, double v) {
     final updated = [...state.items];
-    updated[index] = updated[index].copyWith(price: v);
+    if (index < 0 || index >= updated.length) return;
+
+    final safePrice = v < 0 ? 0.0 : v;
+    updated[index] = updated[index].copyWith(price: safePrice);
     state = state.copyWith(items: updated);
   }
+
+  void setBusinessId(String id) => state = state.copyWith(businessId: id);
 }

@@ -5,6 +5,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:whatsapp_invoice/features/invoice/presentation/pages/businesses_page.dart';
+import 'package:whatsapp_invoice/features/invoice/presentation/pages/items_page.dart';
 
 import '../../domain/business_profile.dart';
 import '../state/business_profile_notifier.dart';
@@ -114,43 +116,31 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // ----------------- BUSINESS PROFILE -----------------
-          TextField(
-            controller: nameCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Business name',
-              border: OutlineInputBorder(),
-            ),
+          const SizedBox(height: 10),
+          ListTile(
+            leading: const Icon(Icons.storefront_outlined),
+            title: const Text('Manage Businesses'),
+            subtitle: const Text('Add / edit / delete businesses'),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const BusinessesPage()),
+              );
+            },
           ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: phoneCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Business phone',
-              border: OutlineInputBorder(),
-            ),
-            keyboardType: TextInputType.phone,
+          const SizedBox(height: 10),
+          ListTile(
+            leading: const Icon(Icons.inventory_2_outlined),
+            title: const Text('Manage Items Catalog'),
+            subtitle: const Text('Add / edit / delete items'),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ItemsPage()),
+              );
+            },
           ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: addressCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Business address',
-              border: OutlineInputBorder(),
-            ),
-            maxLines: 2,
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: upiCtrl,
-            decoration: const InputDecoration(
-              labelText: 'UPI ID (for payments)',
-              border: OutlineInputBorder(),
-              hintText: 'example@upi',
-            ),
-          ),
-          const SizedBox(height: 12),
-
+          const SizedBox(height: 16),
           // ----------------- INVOICE NUMBERING MODE -----------------
           DropdownButtonFormField<InvoiceNumberMode>(
             initialValue: profile.invoiceNumberMode,
@@ -181,8 +171,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               }
             },
           ),
-
-          const SizedBox(height: 16),
+          const SizedBox(height: 10),
           FilledButton(
             onPressed: () async {
               // ✅ Keep current mode when saving profile
@@ -203,7 +192,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const SizedBox(height: 24),
           const Divider(),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
 
           // ----------------- BACKUP / EXPORT -----------------
           const Text(

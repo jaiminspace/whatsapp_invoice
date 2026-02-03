@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:whatsapp_invoice/features/invoice/presentation/pages/businesses_page.dart';
+import 'package:whatsapp_invoice/features/invoice/presentation/pages/items_page.dart';
 
 import '../../domain/invoice_models.dart';
 import '../state/invoice_filter_provider.dart';
@@ -57,6 +59,26 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
       appBar: AppBar(
         title: const Text('InvoiceMaker'),
         actions: [
+          IconButton(
+            tooltip: 'Businesses',
+            icon: const Icon(Icons.storefront_outlined),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const BusinessesPage()),
+              );
+            },
+          ),
+          IconButton(
+            tooltip: 'Items Catalog',
+            icon: const Icon(Icons.inventory_2_outlined),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ItemsPage()),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             onPressed: () => Navigator.push(

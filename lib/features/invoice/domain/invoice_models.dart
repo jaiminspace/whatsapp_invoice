@@ -1,3 +1,5 @@
+// file: invoice_models.dart
+
 enum PaymentStatus { pending, paid }
 
 // ======================= INVOICE ITEM =======================
@@ -29,11 +31,24 @@ class InvoiceItem {
     'price': price,
   };
 
-  factory InvoiceItem.fromJson(Map<dynamic, dynamic> json) => InvoiceItem(
-    name: (json['name'] ?? '').toString(),
-    qty: (json['qty'] ?? 1) as int,
-    price: ((json['price'] ?? 0) as num).toDouble(),
-  );
+  factory InvoiceItem.fromJson(Map<dynamic, dynamic> json) {
+    final qtyRaw = json['qty'];
+    final priceRaw = json['price'];
+
+    final parsedQty = qtyRaw is int
+        ? qtyRaw
+        : (qtyRaw is num ? qtyRaw.toInt() : int.tryParse('$qtyRaw') ?? 1);
+
+    final parsedPrice = priceRaw is num
+        ? priceRaw.toDouble()
+        : double.tryParse('$priceRaw') ?? 0.0;
+
+    return InvoiceItem(
+      name: (json['name'] ?? '').toString(),
+      qty: parsedQty < 1 ? 1 : parsedQty,
+      price: parsedPrice < 0 ? 0.0 : parsedPrice,
+    );
+  }
 }
 
 // ======================= INVOICE DRAFT =======================
@@ -43,56 +58,76 @@ class InvoiceDraft {
   final String customerMobile;
   final List<InvoiceItem> items;
 
-  // ✅ Manual invoice number (used when mode = manual)
-  final String customInvoiceNumber;
+  final String customInvoiceNumber; // manual mode input
+  final DateTime invoiceDateTime; // selected invoice date/time
+
+  final String businessId;
 
   const InvoiceDraft({
     required this.customerName,
     required this.customerMobile,
     required this.items,
     required this.customInvoiceNumber,
+    required this.invoiceDateTime,
+    required this.businessId,
   });
 
-  factory InvoiceDraft.initial() => const InvoiceDraft(
+  factory InvoiceDraft.initial() => InvoiceDraft(
     customerName: '',
     customerMobile: '',
-    items: [],
+    items: const [],
     customInvoiceNumber: '',
+    invoiceDateTime: DateTime.now(),
+    businessId: ''
   );
 
-  // ✅ Required by Invoice.total
-  double get grandTotal =>
-      items.fold(0.0, (sum, item) => sum + item.total);
+  factory InvoiceDraft.empty() => InvoiceDraft.initial();
+
+  double get grandTotal => items.fold(0.0, (sum, e) => sum + e.total);
 
   Map<String, dynamic> toJson() => {
     'customerName': customerName,
     'customerMobile': customerMobile,
     'items': items.map((e) => e.toJson()).toList(),
     'customInvoiceNumber': customInvoiceNumber,
+    'invoiceDateTime': invoiceDateTime.toIso8601String(),
+    'businessId': businessId,
   };
 
-  factory InvoiceDraft.fromJson(Map<dynamic, dynamic> json) => InvoiceDraft(
-    customerName: (json['customerName'] ?? '').toString(),
-    customerMobile: (json['customerMobile'] ?? '').toString(),
-    items: (json['items'] as List? ?? [])
-        .map((e) => InvoiceItem.fromJson(e as Map))
-        .toList(),
-    customInvoiceNumber:
-    (json['customInvoiceNumber'] ?? '').toString(),
-  );
+  factory InvoiceDraft.fromJson(Map<dynamic, dynamic> json) {
+    final itemsRaw = (json['items'] as List?) ?? const [];
+    final parsedItems = itemsRaw
+        .map((e) => InvoiceItem.fromJson(e as Map<dynamic, dynamic>))
+        .toList();
+
+    final dt = DateTime.tryParse((json['invoiceDateTime'] ?? '').toString()) ??
+        DateTime.now(); // fallback for old drafts
+
+    return InvoiceDraft(
+      customerName: (json['customerName'] ?? '').toString(),
+      customerMobile: (json['customerMobile'] ?? '').toString(),
+      items: parsedItems,
+      customInvoiceNumber: (json['customInvoiceNumber'] ?? '').toString(),
+      invoiceDateTime: dt,
+      businessId: (json['businessId'] ?? '').toString(),
+    );
+  }
 
   InvoiceDraft copyWith({
     String? customerName,
     String? customerMobile,
     List<InvoiceItem>? items,
     String? customInvoiceNumber,
+    DateTime? invoiceDateTime,
+    String? businessId,
   }) {
     return InvoiceDraft(
       customerName: customerName ?? this.customerName,
       customerMobile: customerMobile ?? this.customerMobile,
       items: items ?? this.items,
-      customInvoiceNumber:
-      customInvoiceNumber ?? this.customInvoiceNumber,
+      customInvoiceNumber: customInvoiceNumber ?? this.customInvoiceNumber,
+      invoiceDateTime: invoiceDateTime ?? this.invoiceDateTime,
+      businessId: businessId ?? this.businessId,
     );
   }
 }
@@ -101,7 +136,7 @@ class InvoiceDraft {
 
 class Invoice {
   final String id;
-  final DateTime createdAt;
+  final DateTime createdAt; // ✅ source of truth for invoice date/time
   final InvoiceDraft draft;
   final PaymentStatus status;
   final String invoiceNumber;
@@ -118,6 +153,7 @@ class Invoice {
 
   Map<String, dynamic> toJson() => {
     'id': id,
+    // ✅ FIX: serialize createdAt (NOT draft.invoiceDateTime)
     'createdAt': createdAt.toIso8601String(),
     'draft': draft.toJson(),
     'status': status.toString().split('.').last, // web-safe
@@ -136,23 +172,28 @@ class Invoice {
       orElse: () => PaymentStatus.pending,
     );
 
+    final draft = InvoiceDraft.fromJson(json['draft'] as Map<dynamic, dynamic>);
+
+    // ✅ Backward-compatible:
+    // if old data doesn't have createdAt, use draft.invoiceDateTime
+    final createdAt =
+        DateTime.tryParse((json['createdAt'] ?? '').toString()) ??
+            draft.invoiceDateTime;
+
     return Invoice(
       id: (json['id'] ?? '').toString(),
-      invoiceNumber: invNo, // empty allowed for old invoices
-      createdAt:
-      DateTime.tryParse((json['createdAt'] ?? '').toString()) ??
-          DateTime.now(),
-      draft:
-      InvoiceDraft.fromJson(json['draft'] as Map<dynamic, dynamic>),
+      invoiceNumber: invNo,
+      createdAt: createdAt,
+      draft: draft,
       status: status,
     );
   }
 
-  Invoice copyWith({PaymentStatus? status}) {
+  Invoice copyWith({PaymentStatus? status, InvoiceDraft? draft}) {
     return Invoice(
       id: id,
       createdAt: createdAt,
-      draft: draft,
+      draft: draft ?? this.draft,
       status: status ?? this.status,
       invoiceNumber: invoiceNumber,
     );
