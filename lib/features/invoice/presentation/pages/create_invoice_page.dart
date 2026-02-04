@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import 'package:whatsapp_invoice/features/invoice/presentation/state/invoice_list_notifier.dart';
 import 'package:whatsapp_invoice/features/invoice/presentation/state/customer_notifier.dart';
 import 'package:whatsapp_invoice/features/invoice/presentation/state/invoice_filter_provider.dart';
+import 'package:whatsapp_invoice/features/invoice/presentation/state/invoice_list_notifier.dart';
 
 import '../../../../core/ui/app_confirm_dialog.dart';
 import '../../domain/business_profile.dart';
@@ -17,7 +17,14 @@ import '../../domain/item_catalog_models.dart';
 import '../state/invoice_draft_notifier.dart';
 
 class CreateInvoicePage extends ConsumerStatefulWidget {
-  const CreateInvoicePage({super.key});
+  final bool isEdit;
+  final String? editingInvoiceId;
+
+  const CreateInvoicePage({
+    super.key,
+    this.isEdit = false,
+    this.editingInvoiceId,
+  });
 
   @override
   ConsumerState<CreateInvoicePage> createState() => _CreateInvoicePageState();
@@ -94,6 +101,7 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
     final notifier = ref.read(invoiceDraftProvider.notifier);
     notifier.updateItemName(index, selected.name);
     notifier.updateItemPrice(index, selected.price);
+    // updateItemPrice() merges duplicates in your notifier
   }
 
   @override
@@ -103,16 +111,37 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
 
     // ✅ invoice number mode from business profile (existing)
     final profile = ref.watch(businessProfileProvider);
-    final isManual = profile.invoiceNumberMode == InvoiceNumberMode.manual;
+    final isManualProfile = profile.invoiceNumberMode == InvoiceNumberMode.manual;
 
     // ✅ Multi-business
     final businesses = ref.watch(businessListProvider);
     final selectedBusiness = ref.watch(selectedBusinessProvider);
 
-    // If draft has no businessId, default to selectedBusiness/first
-    if (draft.businessId.trim().isEmpty && selectedBusiness != null) {
+    // ✅ FIX: remove duplicates by id to avoid Dropdown crash
+    final uniqueMap = <String, dynamic>{};
+    for (final b in businesses) {
+      uniqueMap[b.id] = b; // last wins
+    }
+    final uniqueBusinesses = uniqueMap.values.toList();
+
+    // ✅ FIX: safe selected value that exists in unique list
+    String? selectedId;
+    if (draft.businessId.trim().isNotEmpty &&
+        uniqueBusinesses.any((b) => b.id == draft.businessId)) {
+      selectedId = draft.businessId;
+    } else if (selectedBusiness != null &&
+        uniqueBusinesses.any((b) => b.id == selectedBusiness.id)) {
+      selectedId = selectedBusiness.id;
+    } else if (uniqueBusinesses.isNotEmpty) {
+      selectedId = uniqueBusinesses.first.id;
+    } else {
+      selectedId = null;
+    }
+
+    // If draft has no businessId, default it once (post-frame)
+    if (draft.businessId.trim().isEmpty && selectedId != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        ref.read(invoiceDraftProvider.notifier).setBusinessId(selectedBusiness.id);
+        ref.read(invoiceDraftProvider.notifier).setBusinessId(selectedId!);
       });
     }
 
@@ -120,7 +149,7 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Create Invoice'),
+        title: Text(widget.isEdit ? 'Edit Invoice' : 'Create Invoice'),
         actions: [
           IconButton(
             onPressed: _resetDraft,
@@ -133,20 +162,23 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
         padding: const EdgeInsets.all(16),
         children: [
           // ================= BUSINESS SELECTOR =================
-          if (businesses.isNotEmpty)
+          if (uniqueBusinesses.isNotEmpty)
             DropdownButtonFormField<String>(
-              value: (draft.businessId.trim().isNotEmpty)
-                  ? draft.businessId
-                  : (selectedBusiness?.id ?? businesses.first.id),
+              value: selectedId,
               decoration: const InputDecoration(
                 labelText: 'Business',
                 border: OutlineInputBorder(),
               ),
-              items: businesses
-                  .map((b) => DropdownMenuItem(
-                value: b.id,
-                child: Text(b.name.isEmpty ? 'Business' : b.name),
-              ))
+              items: uniqueBusinesses
+                  .map(
+                    (b) => DropdownMenuItem<String>(
+                  value: b.id,
+                  child: Text(
+                    (b.name as String).trim().isEmpty ? 'Business' : b.name,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              )
                   .toList(),
               onChanged: (id) {
                 if (id == null) return;
@@ -155,11 +187,11 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
               },
             )
           else
-            Card(
+            const Card(
               child: ListTile(
-                leading: const Icon(Icons.storefront_outlined),
-                title: const Text('No business found'),
-                subtitle: const Text('Add at least 1 business to continue.'),
+                leading: Icon(Icons.storefront_outlined),
+                title: Text('No business found'),
+                subtitle: Text('Add at least 1 business to continue.'),
               ),
             ),
 
@@ -201,7 +233,7 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
           const SizedBox(height: 12),
 
           // ================= MANUAL INVOICE NUMBER =================
-          if (isManual) ...[
+          if (isManualProfile) ...[
             TextField(
               controller: _manualInvCtrl,
               decoration: const InputDecoration(
@@ -274,15 +306,12 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
                     Row(
                       children: [
                         Expanded(
-                          child: TextField(
+                          child: TextFormField(
+                            initialValue: item.name,
                             decoration: const InputDecoration(
                               labelText: 'Item name',
                               border: OutlineInputBorder(),
                             ),
-                            controller: TextEditingController(text: item.name)
-                              ..selection = TextSelection.fromPosition(
-                                TextPosition(offset: item.name.length),
-                              ),
                             onChanged: (v) => notifier.updateItemName(index, v),
                           ),
                         ),
@@ -312,16 +341,13 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
                     Row(
                       children: [
                         Expanded(
-                          child: TextField(
+                          child: TextFormField(
+                            initialValue: item.qty.toString(),
                             decoration: const InputDecoration(
                               labelText: 'Qty',
                               border: OutlineInputBorder(),
                             ),
                             keyboardType: TextInputType.number,
-                            controller: TextEditingController(text: item.qty.toString())
-                              ..selection = TextSelection.fromPosition(
-                                TextPosition(offset: item.qty.toString().length),
-                              ),
                             onChanged: (v) => notifier.updateItemQty(
                               index,
                               int.tryParse(v) ?? 1,
@@ -330,19 +356,16 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
                         ),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: TextField(
+                          child: TextFormField(
+                            initialValue: item.price.toStringAsFixed(2),
                             decoration: const InputDecoration(
                               labelText: 'Price',
                               border: OutlineInputBorder(),
                               prefixText: '₹ ',
                             ),
-                            keyboardType:
-                            const TextInputType.numberWithOptions(decimal: true),
-                            controller: TextEditingController(
-                                text: item.price.toStringAsFixed(2))
-                              ..selection = TextSelection.fromPosition(
-                                TextPosition(offset: item.price.toStringAsFixed(2).length),
-                              ),
+                            keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
                             onChanged: (v) => notifier.updateItemPrice(
                               index,
                               double.tryParse(v) ?? 0.0,
@@ -387,17 +410,20 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
               title: const Text('Grand Total'),
               trailing: Text(
                 '₹${draft.grandTotal.toStringAsFixed(2)}',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),
 
           const SizedBox(height: 16),
 
-          // ================= SAVE =================
+          // ================= SAVE / UPDATE =================
           FilledButton(
             onPressed: () async {
-              if (businesses.isEmpty) {
+              if (uniqueBusinesses.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Please add a business first')),
                 );
@@ -411,30 +437,57 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
                 return;
               }
 
-              if (draft.items.isEmpty) {
+              // ✅ OPTIONAL ITEMS (as per your latest requirement)
+              // So we do NOT block save if items are empty.
+
+              // ✅ If manual mode: invoice number must be entered
+              final sb = uniqueBusinesses.firstWhere(
+                    (b) => b.id == draft.businessId,
+                orElse: () => uniqueBusinesses.first,
+              );
+              final isManual = sb.invoiceNumberMode == InvoiceNumberMode.manual;
+
+              if (isManual && draft.customInvoiceNumber.trim().isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Add at least 1 item')),
+                  const SnackBar(content: Text('Please enter invoice number')),
                 );
                 return;
               }
 
               final ok = await AppConfirmDialog.show(
                 context,
-                title: 'Save invoice?',
+                title: widget.isEdit ? 'Update invoice?' : 'Save invoice?',
                 message:
                 'Total: ₹${draft.grandTotal.toStringAsFixed(2)}\n'
                     'Customer: ${draft.customerName.isEmpty ? 'Customer' : draft.customerName}\n'
                     'Date: $dateStr',
-                confirmText: 'Save',
+                confirmText: widget.isEdit ? 'Update' : 'Save',
               );
               if (!ok) return;
 
-              await ref.read(invoiceListProvider.notifier).addFromDraft(draft);
+              if (widget.isEdit) {
+                final id = widget.editingInvoiceId;
+                if (id == null || id.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Missing invoice id to edit')),
+                  );
+                  return;
+                }
 
-              await ref.read(customerListProvider.notifier).upsertFromInvoice(
-                name: draft.customerName,
-                mobile: draft.customerMobile,
-              );
+                await ref
+                    .read(invoiceListProvider.notifier)
+                    .updateFromDraft(invoiceId: id, draft: draft);
+              } else {
+                await ref.read(invoiceListProvider.notifier).addFromDraft(draft);
+              }
+
+              // ✅ upsert customer only if mobile present
+              if (draft.customerMobile.trim().isNotEmpty) {
+                await ref.read(customerListProvider.notifier).upsertFromInvoice(
+                  name: draft.customerName,
+                  mobile: draft.customerMobile,
+                );
+              }
 
               ref.read(invoiceDraftProvider.notifier).reset();
 
@@ -443,7 +496,7 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
 
               if (context.mounted) Navigator.pop(context);
             },
-            child: const Text('Save Invoice'),
+            child: Text(widget.isEdit ? 'Update Invoice' : 'Save Invoice'),
           ),
         ],
       ),
@@ -489,7 +542,8 @@ class _CatalogPickerSheet extends ConsumerStatefulWidget {
   const _CatalogPickerSheet();
 
   @override
-  ConsumerState<_CatalogPickerSheet> createState() => _CatalogPickerSheetState();
+  ConsumerState<_CatalogPickerSheet> createState() =>
+      _CatalogPickerSheetState();
 }
 
 class _CatalogPickerSheetState extends ConsumerState<_CatalogPickerSheet> {
@@ -539,7 +593,9 @@ class _CatalogPickerSheetState extends ConsumerState<_CatalogPickerSheet> {
             if (all.isEmpty)
               const Padding(
                 padding: EdgeInsets.all(16),
-                child: Text('No catalog items found.\nAdd items from Items page.'),
+                child: Text(
+                  'No catalog items found.\nAdd items from Items page.',
+                ),
               )
             else
               Flexible(

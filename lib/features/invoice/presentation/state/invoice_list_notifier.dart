@@ -7,13 +7,11 @@ import 'package:uuid/uuid.dart';
 import 'package:whatsapp_invoice/features/invoice/data/invoice_local_repo.dart';
 import 'package:whatsapp_invoice/features/invoice/domain/invoice_models.dart';
 
-// ✅ Needed for manual/auto invoice number mode
-import '../state/business_profile_notifier.dart';
-import '../../domain/business_profile.dart';
 import 'business_list_notifier.dart';
+import '../../domain/business_entity.dart';
 
 final invoiceRepoProvider = Provider<InvoiceLocalRepo>((ref) {
-  final box = Hive.box('invoices');
+  final box = Hive.box('invoices'); // MUST be opened in main()
   return InvoiceLocalRepo(box);
 });
 
@@ -30,59 +28,60 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
   List<Invoice> build() {
     repo = ref.read(invoiceRepoProvider);
 
-    // Initial load
+    // initial load
     final initial = List<Invoice>.from(repo.getAll());
 
-    // Auto-refresh when Hive changes
+    // watch hive updates
     final box = Hive.box('invoices');
     _sub?.cancel();
     _sub = box.watch().listen((_) {
       state = List<Invoice>.from(repo.getAll());
     });
 
-    ref.onDispose(() {
-      _sub?.cancel();
-    });
+    ref.onDispose(() => _sub?.cancel());
 
     return initial;
   }
 
-  // ================= INVOICE NUMBERING =================
-
-  String _nextInvoiceNumber() {
-    final box = Hive.box('settings'); // ensure this box is opened in main
-    final last = box.get('invoice_counter', defaultValue: 0) as int;
-    final next = last + 1;
-    box.put('invoice_counter', next);
-
-    return 'INV-${next.toString().padLeft(4, '0')}';
+  // ✅ helper
+  Invoice? getById(String id) {
+    try {
+      return state.firstWhere((e) => e.id == id);
+    } catch (_) {
+      return null;
+    }
   }
 
-  bool _invoiceNumberExists(String invNo) {
-    final n = invNo.trim();
-    if (n.isEmpty) return false;
-    return state.any((e) => e.invoiceNumber.trim() == n);
-  }
-
-  // ================= CRUD =================
-
+  // ================= ADD =================
   Future<void> addFromDraft(InvoiceDraft draft) async {
     final id = const Uuid().v4();
 
-    final business =
+    // business lookup
+    final BusinessEntity? business =
     ref.read(businessListProvider.notifier).getById(draft.businessId);
+
+    // fallback if business missing
+    final InvoiceNumberMode mode =
+        business?.invoiceNumberMode ?? InvoiceNumberMode.auto;
 
     String invoiceNumber;
 
-    if (business.invoiceNumberMode == InvoiceNumberMode.manual) {
-      invoiceNumber = draft.customInvoiceNumber;
+    if (mode == InvoiceNumberMode.manual) {
+      invoiceNumber = draft.customInvoiceNumber.trim();
+      if (invoiceNumber.isEmpty) {
+        // fallback if user left empty
+        invoiceNumber = 'INV-${id.substring(0, 8).toUpperCase()}';
+      }
     } else {
-      final next = business.invoiceCounter + 1;
+      final int next = (business?.invoiceCounter ?? 0) + 1;
       invoiceNumber = 'INV-${next.toString().padLeft(4, '0')}';
 
-      ref.read(businessListProvider.notifier).update(
-        business.copyWith(invoiceCounter: next),
-      );
+      // update counter only if business exists
+      if (business != null) {
+        await ref
+            .read(businessListProvider.notifier)
+            .update(business.copyWith(invoiceCounter: next));
+      }
     }
 
     final invoice = Invoice(
@@ -94,15 +93,37 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
     );
 
     await repo.save(invoice);
-    state = List.from(repo.getAll());
+    state = List<Invoice>.from(repo.getAll());
+  }
+
+  // ================= UPDATE (EDIT) =================
+  Future<void> updateFromDraft({
+    required String invoiceId,
+    required InvoiceDraft draft,
+  }) async {
+    final old = getById(invoiceId);
+    if (old == null) return;
+
+    final updated = Invoice(
+      id: old.id,
+      createdAt: draft.invoiceDateTime, // ✅ correctly updated
+      draft: draft,
+      invoiceNumber: old.invoiceNumber, // ✅ keep same number
+      status: old.status,               // ✅ keep same status
+    );
+
+    await repo.save(updated);
+    state = List<Invoice>.from(repo.getAll());
   }
 
 
+  // ================= DELETE =================
   Future<void> deleteInvoice(String id) async {
     await repo.delete(id);
     state = List<Invoice>.from(repo.getAll());
   }
 
+  // ================= STATUS =================
   Future<void> togglePaymentStatus(Invoice invoice) async {
     final updated = invoice.copyWith(
       status: invoice.status == PaymentStatus.paid
@@ -114,6 +135,7 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
     state = List<Invoice>.from(repo.getAll());
   }
 
+  // ================= IMPORT =================
   Future<void> importMany(List<Invoice> invoices) async {
     for (final inv in invoices) {
       await repo.save(inv);

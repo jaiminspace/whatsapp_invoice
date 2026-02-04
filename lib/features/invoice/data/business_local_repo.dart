@@ -9,9 +9,7 @@ class BusinessLocalRepo {
 
   List<BusinessEntity> getAll() {
     return box.values
-        .map((e) => BusinessEntity.fromJson(
-      Map<String, dynamic>.from(e),
-    ))
+        .map((e) => BusinessEntity.fromJson(Map<dynamic, dynamic>.from(e)))
         .toList();
   }
 
