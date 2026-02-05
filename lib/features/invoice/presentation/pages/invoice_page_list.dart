@@ -55,13 +55,15 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
         context,
         MaterialPageRoute(builder: (_) => const CreateInvoicePage()),
       );
+      // ✅ FORCE refresh every time returning
+      await ref.read(invoiceListProvider.notifier).refresh();
     }
 
-    _searchCtrl.clear();
-    ref.read(invoiceSearchProvider.notifier).state = '';
-    ref.read(invoiceFilterProvider.notifier).state = InvoiceFilter.all;
-    ref.read(invoiceDateFilterProvider.notifier).state = InvoiceDateFilter.allTime;
-    ref.read(invoiceCustomRangeProvider.notifier).state = null;
+    // ✅ IMPORTANT: force refresh so newly added/edited invoice shows immediately
+    ref.invalidate(invoiceListProvider);
+
+    // ❌ Do NOT reset filters/search/date here.
+    // Keep user’s selected Paid/Unpaid/Date range exactly as-is.
   }
 
   Future<void> _openDetail(Invoice inv) async {

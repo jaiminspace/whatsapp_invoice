@@ -186,4 +186,9 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
       ),
     );
   }
+
+  Future<void> refresh() async {
+    // force pull latest from Hive
+    state = List<Invoice>.from(repo.getAll());
+  }
 }

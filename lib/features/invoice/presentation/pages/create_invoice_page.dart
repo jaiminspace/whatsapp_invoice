@@ -176,8 +176,6 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
     );
 
     ref.read(invoiceDraftProvider.notifier).reset();
-    ref.read(invoiceFilterProvider.notifier).state = InvoiceFilter.all;
-    ref.read(invoiceSearchProvider.notifier).state = '';
 
     if (mounted) Navigator.pop(context);
   }
