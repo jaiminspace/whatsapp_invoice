@@ -79,30 +79,30 @@ List<Invoice> importInvoicesFromCsvText(String csvText) {
     final createdAt = DateTime.tryParse(dateStr) ?? DateTime.now();
     final total = double.tryParse(totalStr) ?? 0.0;
 
-    final draft = InvoiceDraft(
-      customerName: name,
-      customerMobile: mobile,
-      items: [
-        InvoiceItem(
-          name: 'Imported Total',
-          qty: 1,
-          price: total,
-        ),
-      ],
-      customInvoiceNumber: '',
-      invoiceDateTime: createdAt,
-      businessId: '', // ✅ REQUIRED (CSV has no business info)
-    );
-
-    invoices.add(
-      Invoice(
-        id: id.isEmpty ? _fallbackId() : id,
-        invoiceNumber: '', // CSV does not include invoice number
-        createdAt: createdAt, // ✅ this drives sorting/grouping
-        draft: draft,
-        status: _parsePaymentStatus(statusStr),
-      ),
-    );
+    // final draft = InvoiceDraft(
+    //   customerName: name,
+    //   customerMobile: mobile,
+    //   items: [
+    // //     InvoiceItem(
+    // //       name: 'Imported Total',
+    // //       qty: 1,
+    // //       price: total,
+    // //     ),
+    // //   ],
+    // //   customInvoiceNumber: '',
+    // //   invoiceDateTime: createdAt,
+    // //   businessId: '', status: , // ✅ REQUIRED (CSV has no business info)
+    // // );
+    //
+    // invoices.add(
+    //   Invoice(
+    //     id: id.isEmpty ? _fallbackId() : id,
+    //     invoiceNumber: '', // CSV does not include invoice number
+    //     createdAt: createdAt, // ✅ this drives sorting/grouping
+    //     draft: draft,
+    //     status: _parsePaymentStatus(statusStr),
+    //   ),
+    // );
   }
 
   return invoices;

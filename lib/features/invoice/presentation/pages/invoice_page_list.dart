@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
 import '../../../../core/ui/app_confirm_dialog.dart';
 import '../../../../core/ui/first_run_setup_sheet.dart';
 
 import '../../domain/invoice_models.dart';
-
 import '../state/invoice_filter_provider.dart';
 import '../state/invoice_list_notifier.dart';
 import '../state/invoice_draft_notifier.dart';
@@ -16,12 +14,13 @@ import '../state/catalog_notifier.dart';
 
 import 'create_invoice_page.dart';
 import 'invoice_detail_page.dart';
-
-import 'logs_page.dart';
+import 'settings_page.dart';
+import 'customers_page.dart';
 import 'businesses_page.dart';
 import 'items_page.dart';
-import 'customers_page.dart';
-import 'settings_page.dart';
+
+// ✅ change if your file/class name is different
+import 'logs_page.dart';
 
 class InvoiceListPage extends ConsumerStatefulWidget {
   const InvoiceListPage({super.key});
@@ -42,7 +41,6 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
   Future<void> _openCreate({Invoice? editInvoice}) async {
     if (editInvoice != null) {
       ref.read(invoiceDraftProvider.notifier).loadFromInvoice(editInvoice);
-
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -59,10 +57,11 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
       );
     }
 
-    // Optional UX reset
     _searchCtrl.clear();
     ref.read(invoiceSearchProvider.notifier).state = '';
     ref.read(invoiceFilterProvider.notifier).state = InvoiceFilter.all;
+    ref.read(invoiceDateFilterProvider.notifier).state = InvoiceDateFilter.allTime;
+    ref.read(invoiceCustomRangeProvider.notifier).state = null;
   }
 
   Future<void> _openDetail(Invoice inv) async {
@@ -78,34 +77,63 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
       FirstRunSetupSheet.maybeShow(context, ref);
     });
 
-    final filtered = ref.watch(filteredInvoicesProvider);
+    final invoices = ref.watch(filteredInvoicesProvider);
+
     final filter = ref.watch(invoiceFilterProvider);
     final sort = ref.watch(invoiceSortProvider);
 
-    // summary based on all invoices
-    final allInvoices = ref.watch(invoiceListProvider);
+    final dateFilter = ref.watch(invoiceDateFilterProvider);
+    final customRange = ref.watch(invoiceCustomRangeProvider);
+
     final customers = ref.watch(customerListProvider);
     final items = ref.watch(catalogProvider);
 
-    final totalPaid = allInvoices
+    final totalPaid = invoices
         .where((e) => e.status == PaymentStatus.paid)
-        .fold<double>(0, (sum, e) => sum + e.total);
+        .fold<double>(0, (p, e) => p + e.total);
 
-    final totalUnpaid = allInvoices
-        .where((e) => e.status != PaymentStatus.paid)
-        .fold<double>(0, (sum, e) => sum + e.total);
-
-    final grouped = _groupByMonth(filtered);
+    final totalUnpaid = invoices
+        .where((e) => e.status == PaymentStatus.pending)
+        .fold<double>(0, (p, e) => p + e.total);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Invoices'),
-
-        // ✅ Logs icon ALWAYS visible
+        title: const Text('InvoiceMaker'),
         actions: [
           IconButton(
-            tooltip: 'Logs',
-            icon: const Icon(Icons.history_rounded),
+            tooltip: 'Businesses',
+            icon: const Icon(Icons.storefront_outlined),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const BusinessesPage()),
+              );
+            },
+          ),
+          IconButton(
+            tooltip: 'Items Catalog',
+            icon: const Icon(Icons.inventory_2_outlined),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ItemsPage()),
+              );
+            },
+          ),
+          IconButton(
+            tooltip: 'Customers',
+            icon: const Icon(Icons.people_alt_outlined),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const CustomersPage()),
+              );
+            },
+          ),
+          // ✅ Logs icon
+          IconButton(
+            tooltip: 'Activity Logs',
+            icon: const Icon(Icons.history),
             onPressed: () {
               Navigator.push(
                 context,
@@ -113,39 +141,15 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
               );
             },
           ),
-
-          // Move everything else into "More" menu so icons don't disappear
-          PopupMenuButton<String>(
-            tooltip: 'More',
-            onSelected: (v) {
-              if (v == 'business') {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const BusinessesPage()),
-                );
-              } else if (v == 'items') {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const ItemsPage()),
-                );
-              } else if (v == 'customers') {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const CustomersPage()),
-                );
-              } else if (v == 'settings') {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const SettingsPage()),
-                );
-              }
+          IconButton(
+            tooltip: 'Settings',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsPage()),
+              );
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'business', child: Text('Businesses')),
-              PopupMenuItem(value: 'items', child: Text('Items Catalog')),
-              PopupMenuItem(value: 'customers', child: Text('Customers')),
-              PopupMenuItem(value: 'settings', child: Text('Settings')),
-            ],
           ),
         ],
       ),
@@ -153,28 +157,24 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
         onPressed: () => _openCreate(),
         child: const Icon(Icons.add),
       ),
-      body: Column(
-        children: [
-          // ================= SEARCH FIRST =================
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: TextField(
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+          children: [
+            // -------------------- Search --------------------
+            TextField(
               controller: _searchCtrl,
               decoration: InputDecoration(
-                hintText: 'Search by customer name / mobile',
+                hintText: 'Search by customer / mobile / invoice no',
                 prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
               ),
               onChanged: (v) => ref.read(invoiceSearchProvider.notifier).state = v,
             ),
-          ),
+            const SizedBox(height: 10),
 
-          // ================= FILTER + SORT =================
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
+            // -------------------- Filters + Sort --------------------
+            Row(
               children: [
                 Expanded(
                   child: SingleChildScrollView(
@@ -184,25 +184,19 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
                         _chip(
                           label: 'All',
                           selected: filter == InvoiceFilter.all,
-                          onTap: () =>
-                          ref.read(invoiceFilterProvider.notifier).state =
-                              InvoiceFilter.all,
+                          onTap: () => ref.read(invoiceFilterProvider.notifier).state = InvoiceFilter.all,
                         ),
                         const SizedBox(width: 8),
                         _chip(
                           label: 'Paid',
                           selected: filter == InvoiceFilter.paid,
-                          onTap: () =>
-                          ref.read(invoiceFilterProvider.notifier).state =
-                              InvoiceFilter.paid,
+                          onTap: () => ref.read(invoiceFilterProvider.notifier).state = InvoiceFilter.paid,
                         ),
                         const SizedBox(width: 8),
                         _chip(
                           label: 'Unpaid',
                           selected: filter == InvoiceFilter.pending,
-                          onTap: () =>
-                          ref.read(invoiceFilterProvider.notifier).state =
-                              InvoiceFilter.pending,
+                          onTap: () => ref.read(invoiceFilterProvider.notifier).state = InvoiceFilter.pending,
                         ),
                       ],
                     ),
@@ -215,89 +209,103 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
                 ),
               ],
             ),
-          ),
+            const SizedBox(height: 10),
 
-          const SizedBox(height: 10),
-
-          // ================= SUMMARY CHIPS AFTER FILTER =================
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-            child: Column(
+            // -------------------- Date Filter --------------------
+            Row(
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: _SummaryBox(
-                        title: 'Total Paid',
-                        value: '₹${totalPaid.toStringAsFixed(2)}',
-                        valueColor: Colors.green,
-                        icon: Icons.verified_outlined,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _SummaryBox(
-                        title: 'Total Unpaid',
-                        value: '₹${totalUnpaid.toStringAsFixed(2)}',
-                        valueColor: Colors.red,
-                        icon: Icons.pending_outlined,
-                      ),
-                    ),
-                  ],
+                Expanded(
+                  child: _DateFilterButton(
+                    value: dateFilter,
+                    onChanged: (v) {
+                      ref.read(invoiceDateFilterProvider.notifier).state = v;
+                      if (v != InvoiceDateFilter.custom) {
+                        ref.read(invoiceCustomRangeProvider.notifier).state = null;
+                      }
+                    },
+                    customRange: customRange,
+                  ),
                 ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _SummaryBox(
-                        title: 'Invoices',
-                        value: '${allInvoices.length}',
-                        icon: Icons.receipt_outlined,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _SummaryBox(
-                        title: 'Customers',
-                        value: '${customers.length}',
-                        icon: Icons.people_outline,
-                      ),
-                    ),
-                  ],
-                ),
+                if (dateFilter == InvoiceDateFilter.custom) ...[
+                  const SizedBox(width: 10),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.date_range),
+                    label: const Text('Pick'),
+                    onPressed: () async {
+                      final now = DateTime.now();
+                      final initial = ref.read(invoiceCustomRangeProvider) ??
+                          DateTimeRange(
+                            start: DateTime(now.year, now.month, 1),
+                            end: now,
+                          );
+
+                      final picked = await showDateRangePicker(
+                        context: context,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime(2100),
+                        initialDateRange: initial,
+                      );
+
+                      if (picked != null) {
+                        ref.read(invoiceCustomRangeProvider.notifier).state = picked;
+                      }
+                    },
+                  ),
+                ],
               ],
             ),
-          ),
 
-          // ================= LIST =================
-          Expanded(
-            child: filtered.isEmpty
-                ? const Center(
-              child: Text(
-                'No invoices yet.\nTap + to create invoice',
-                textAlign: TextAlign.center,
-              ),
-            )
-                : ListView.builder(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              itemCount: grouped.length,
-              itemBuilder: (context, index) {
-                final section = grouped[index];
-                return _MonthSection(
-                  title: section.title,
-                  invoices: section.items,
-                  onTapInvoice: _openDetail,
-                  onEditInvoice: (inv) => _openCreate(editInvoice: inv),
-                );
-              },
+            const SizedBox(height: 12),
+
+            // -------------------- Summary chips (AFTER filters) --------------------
+            _SummaryGrid(
+              totalPaid: totalPaid,
+              totalUnpaid: totalUnpaid,
+              invoiceCount: invoices.length,
+              customerCount: customers.length,
+              itemCount: items.length,
             ),
-          ),
-        ],
+
+            const SizedBox(height: 14),
+
+            // -------------------- List --------------------
+            if (invoices.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 40),
+                child: Center(
+                  child: Text(
+                    'No invoices found.\nTap + to create invoice',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              )
+            else
+              ...invoices.map(
+                    (inv) => _InvoiceCard(
+                  inv: inv,
+                  onTap: () => _openDetail(inv),
+                  onEdit: () => _openCreate(editInvoice: inv),
+                  onDelete: () async {
+                    final ok = await AppConfirmDialog.show(
+                      context,
+                      title: 'Delete invoice?',
+                      message: 'This invoice will be permanently deleted.',
+                      confirmText: 'Delete',
+                      isDanger: true,
+                    );
+                    if (!ok) return;
+
+                    await ref.read(invoiceListProvider.notifier).deleteInvoice(inv.id);
+                  },
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  static Widget _chip({
+  Widget _chip({
     required String label,
     required bool selected,
     required VoidCallback onTap,
@@ -307,240 +315,200 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
       selected: selected,
       onSelected: (_) => onTap(),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
     );
   }
 }
 
-// ================= SUMMARY BOX =================
+// -------------------- Summary UI --------------------
 
-class _SummaryBox extends StatelessWidget {
-  final String title;
-  final String value;
-  final IconData icon;
-  final Color? valueColor;
+class _SummaryGrid extends StatelessWidget {
+  final double totalPaid;
+  final double totalUnpaid;
+  final int invoiceCount;
+  final int customerCount;
+  final int itemCount;
 
-  const _SummaryBox({
-    required this.title,
-    required this.value,
-    required this.icon,
-    this.valueColor,
+  const _SummaryGrid({
+    required this.totalPaid,
+    required this.totalUnpaid,
+    required this.invoiceCount,
+    required this.customerCount,
+    required this.itemCount,
   });
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-
-    return Container(
-      height: 72, // ✅ equal height in both rows
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: cs.outlineVariant.withOpacity(0.45)),
-        color: cs.surface,
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: Theme.of(context).textTheme.labelSmall),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    fontSize: 16,
-                    color: valueColor,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ================= GROUPING HELPERS =================
-
-class _MonthSectionData {
-  final String title;
-  final List<Invoice> items;
-
-  const _MonthSectionData({required this.title, required this.items});
-}
-
-List<_MonthSectionData> _groupByMonth(List<Invoice> invoices) {
-  final now = DateTime.now();
-
-  String monthName(int m) => const [
-    'Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'
-  ][m - 1];
-
-  bool isSameMonth(DateTime a, DateTime b) => a.year == b.year && a.month == b.month;
-
-  final thisMonth = DateTime(now.year, now.month);
-  final lastMonth = DateTime(now.year, now.month - 1);
-
-  final map = <String, List<Invoice>>{};
-
-  for (final inv in invoices) {
-    final key = '${inv.createdAt.year}-${inv.createdAt.month.toString().padLeft(2, '0')}';
-    (map[key] ??= []).add(inv);
-  }
-
-  final keys = map.keys.toList()..sort((a, b) => b.compareTo(a));
-
-  return keys.map((k) {
-    final parts = k.split('-');
-    final y = int.parse(parts[0]);
-    final m = int.parse(parts[1]);
-    final monthDate = DateTime(y, m);
-
-    String title;
-    if (isSameMonth(monthDate, thisMonth)) {
-      title = 'This month';
-    } else if (isSameMonth(monthDate, lastMonth)) {
-      title = 'Last month';
-    } else {
-      title = '${monthName(m)} $y';
-    }
-
-    final items = map[k]!;
-    // keep invoices sorted (most recent first) inside month
-    items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-
-    return _MonthSectionData(title: title, items: items);
-  }).toList();
-}
-
-// ================= MONTH SECTION =================
-
-class _MonthSection extends StatelessWidget {
-  final String title;
-  final List<Invoice> invoices;
-  final void Function(Invoice) onTapInvoice;
-  final void Function(Invoice) onEditInvoice;
-
-  const _MonthSection({
-    required this.title,
-    required this.invoices,
-    required this.onTapInvoice,
-    required this.onEditInvoice,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(4, 14, 4, 8),
-          child: Text(
-            title,
-            style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-            ),
+    Widget tile({
+      required String title,
+      required String value,
+      required IconData icon,
+      Color? valueColor,
+    }) {
+      return Container(
+        height: 74,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.35),
           ),
         ),
-        ...invoices.map(
-              (inv) => _InvoiceTile(
-            inv: inv,
-            onTap: () => onTapInvoice(inv),
-            onEdit: () => onEditInvoice(inv),
-          ),
+        child: Row(
+          children: [
+            Icon(icon, size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.bodySmall,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    value,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                      color: valueColor,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: tile(
+                title: 'Total Paid',
+                value: '₹${totalPaid.toStringAsFixed(0)}',
+                icon: Icons.verified_rounded,
+                valueColor: Colors.green,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: tile(
+                title: 'Total Unpaid',
+                value: '₹${totalUnpaid.toStringAsFixed(0)}',
+                icon: Icons.pending_actions_rounded,
+                valueColor: Colors.red,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: tile(
+                title: 'Invoices',
+                value: invoiceCount.toString(),
+                icon: Icons.receipt_long,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: tile(
+                title: 'Customers',
+                value: customerCount.toString(),
+                icon: Icons.people_alt_outlined,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: tile(
+                title: 'Items',
+                value: itemCount.toString(),
+                icon: Icons.inventory_2_outlined,
+              ),
+            ),
+          ],
         ),
       ],
     );
   }
 }
 
-// ================= INVOICE TILE (beautiful + no overflow) =================
+// -------------------- Invoice Card --------------------
 
-class _InvoiceTile extends ConsumerWidget {
+class _InvoiceCard extends StatelessWidget {
   final Invoice inv;
   final VoidCallback onTap;
   final VoidCallback onEdit;
+  final VoidCallback onDelete;
 
-  const _InvoiceTile({
+  const _InvoiceCard({
     required this.inv,
     required this.onTap,
     required this.onEdit,
+    required this.onDelete,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final cs = Theme.of(context).colorScheme;
-
-    final name = inv.draft.customerName.trim().isEmpty
-        ? 'Customer'
-        : inv.draft.customerName.trim();
-
-    final invNo = inv.invoiceNumber.trim().isNotEmpty
-        ? inv.invoiceNumber.trim()
-        : 'INV-${inv.id.substring(0, 8).toUpperCase()}';
-
-    final dateStr = DateFormat('dd MMM, hh:mm a').format(inv.createdAt);
+  Widget build(BuildContext context) {
+    final name = inv.draft.customerName.trim().isEmpty ? 'Customer' : inv.draft.customerName.trim();
+    final invNo = inv.invoiceNumber.trim().isEmpty
+        ? 'INV-${inv.id.substring(0, 8).toUpperCase()}'
+        : inv.invoiceNumber.trim();
 
     final isPaid = inv.status == PaymentStatus.paid;
-
-    final amount = inv.total.toStringAsFixed(2);
+    final amount = inv.total.toStringAsFixed(0);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: cs.outlineVariant.withOpacity(0.40)),
-        color: cs.surface,
-        boxShadow: [
-          BoxShadow(
-            blurRadius: 10,
-            spreadRadius: 0,
-            offset: const Offset(0, 3),
-            color: Colors.black.withOpacity(0.04),
-          )
-        ],
+        border: Border.all(
+          color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.35),
+        ),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 10, 12),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               CircleAvatar(
                 radius: 20,
-                child: Text(name[0].toUpperCase()),
+                child: Text(name.characters.first.toUpperCase()),
               ),
               const SizedBox(width: 12),
 
-              // middle info
+              // Left content
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       name,
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '$invNo • $dateStr',
+                      invNo,
+                      style: Theme.of(context).textTheme.bodySmall,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
                 ),
@@ -548,56 +516,50 @@ class _InvoiceTile extends ConsumerWidget {
 
               const SizedBox(width: 10),
 
-              // right side (amount + status + menu) -> fixed width so no overflow
-              SizedBox(
-                width: 150,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '₹$amount',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w900),
+              // Right content (no overflow)
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '₹$amount',
+                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                      ),
+                      const SizedBox(width: 6),
+                      PopupMenuButton<String>(
+                        tooltip: 'Options',
+                        onSelected: (v) async {
+                          if (v == 'edit') onEdit();
+                          if (v == 'delete') onDelete();
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(value: 'edit', child: Text('Edit')),
+                          PopupMenuItem(value: 'delete', child: Text('Delete')),
+                        ],
+                        child: const Icon(Icons.more_vert, size: 22),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      color: isPaid ? Colors.green.withOpacity(0.16) : Colors.red.withOpacity(0.16),
                     ),
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _StatusChip(isPaid: isPaid),
-                        const SizedBox(width: 6),
-                        PopupMenuButton<String>(
-                          padding: EdgeInsets.zero,
-                          onSelected: (v) async {
-                            if (v == 'edit') {
-                              onEdit();
-                            } else if (v == 'delete') {
-                              final ok = await AppConfirmDialog.show(
-                                context,
-                                title: 'Delete invoice?',
-                                message: 'This invoice will be permanently deleted.',
-                                confirmText: 'Delete',
-                                isDanger: true,
-                              );
-                              if (!ok) return;
-
-                              await ref
-                                  .read(invoiceListProvider.notifier)
-                                  .deleteInvoice(inv.id);
-                            }
-                          },
-                          itemBuilder: (_) => const [
-                            PopupMenuItem(value: 'edit', child: Text('Edit')),
-                            PopupMenuItem(value: 'delete', child: Text('Delete')),
-                          ],
-                          child: const Icon(Icons.more_vert, size: 20),
-                        ),
-                      ],
+                    child: Text(
+                      isPaid ? 'PAID' : 'UNPAID',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                        color: isPaid ? Colors.green : Colors.red,
+                      ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -607,35 +569,7 @@ class _InvoiceTile extends ConsumerWidget {
   }
 }
 
-class _StatusChip extends StatelessWidget {
-  final bool isPaid;
-
-  const _StatusChip({required this.isPaid});
-
-  @override
-  Widget build(BuildContext context) {
-    final bg = isPaid ? Colors.green.withOpacity(0.16) : Colors.red.withOpacity(0.14);
-    final fg = isPaid ? Colors.green : Colors.red;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        color: bg,
-      ),
-      child: Text(
-        isPaid ? 'PAID' : 'UNPAID',
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w900,
-          color: fg,
-        ),
-      ),
-    );
-  }
-}
-
-// ================= SORT BUTTON =================
+// -------------------- Sort button --------------------
 
 class _SortButton extends StatelessWidget {
   final InvoiceSort value;
@@ -664,7 +598,12 @@ class _SortButton extends StatelessWidget {
       tooltip: 'Sort',
       onSelected: onChanged,
       itemBuilder: (_) => InvoiceSort.values
-          .map((s) => PopupMenuItem(value: s, child: Text(_label(s))))
+          .map(
+            (s) => PopupMenuItem(
+          value: s,
+          child: Text(_label(s)),
+        ),
+      )
           .toList(),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -680,6 +619,80 @@ class _SortButton extends StatelessWidget {
             const Icon(Icons.sort, size: 18),
             const SizedBox(width: 8),
             Text(_label(value)),
+            const SizedBox(width: 6),
+            const Icon(Icons.keyboard_arrow_down, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// -------------------- Date filter button --------------------
+
+class _DateFilterButton extends StatelessWidget {
+  final InvoiceDateFilter value;
+  final ValueChanged<InvoiceDateFilter> onChanged;
+  final DateTimeRange? customRange;
+
+  const _DateFilterButton({
+    required this.value,
+    required this.onChanged,
+    required this.customRange,
+  });
+
+  String _label(InvoiceDateFilter v) {
+    switch (v) {
+      case InvoiceDateFilter.allTime:
+        return 'All time';
+      case InvoiceDateFilter.thisWeek:
+        return 'This week';
+      case InvoiceDateFilter.last7Days:
+        return 'Last 7 days';
+      case InvoiceDateFilter.last30Days:
+        return 'Last 30 days';
+      case InvoiceDateFilter.thisMonth:
+        return 'This month';
+      case InvoiceDateFilter.thisYear:
+        return 'This year';
+      case InvoiceDateFilter.custom:
+        if (customRange == null) return 'Custom range';
+        return 'Custom: ${customRange!.start.day}/${customRange!.start.month} - ${customRange!.end.day}/${customRange!.end.month}';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<InvoiceDateFilter>(
+      tooltip: 'Date filter',
+      onSelected: onChanged,
+      itemBuilder: (_) => InvoiceDateFilter.values
+          .map(
+            (s) => PopupMenuItem(
+          value: s,
+          child: Text(_label(s)),
+        ),
+      )
+          .toList(),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.45),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.calendar_month, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _label(value),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             const SizedBox(width: 6),
             const Icon(Icons.keyboard_arrow_down, size: 18),
           ],
