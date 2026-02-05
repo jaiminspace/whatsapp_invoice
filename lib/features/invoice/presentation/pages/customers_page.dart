@@ -4,7 +4,6 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../state/customer_notifier.dart';
 import '../../domain/customer_model.dart';
-
 import '../../../../core/ui/app_confirm_dialog.dart';
 import '../../../../core/ui/app_snack.dart';
 
@@ -57,15 +56,117 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     }
   }
 
-  Future<void> _openAddOrEdit({
-    Customer? customer,
+  Future<void> _openCustomerSheet({
+    Customer? editing,
   }) async {
-    await showModalBottomSheet(
+    final nameCtrl = TextEditingController(text: editing?.name ?? '');
+    final mobileCtrl = TextEditingController(text: editing?.mobile ?? '');
+    final addressCtrl = TextEditingController(text: editing?.address ?? '');
+
+    final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) => _CustomerFormSheet(customer: customer),
+      builder: (_) {
+        return SafeArea(
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              top: 12,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  editing == null ? 'Add Customer' : 'Edit Customer',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Name (optional)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: mobileCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: 'Mobile *',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: addressCtrl,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Address (optional)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: Text(editing == null ? 'Save' : 'Update'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
+
+    if (saved != true) return;
+
+    final mobile = mobileCtrl.text.trim();
+    if (mobile.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Mobile is required')),
+      );
+      return;
+    }
+
+    final name = nameCtrl.text.trim();
+    final address = addressCtrl.text.trim();
+
+    if (editing == null) {
+      await ref.read(customerListProvider.notifier).addCustomer(
+        name: name,
+        mobile: mobile,
+        address: address,
+      );
+      if (mounted) AppSnack.show(context, 'Customer added');
+    } else {
+      await ref.read(customerListProvider.notifier).updateCustomer(
+        id: editing.id,
+        name: name,
+        mobile: mobile,
+        address: address,
+      );
+      if (mounted) AppSnack.show(context, 'Customer updated');
+    }
   }
 
   @override
@@ -73,24 +174,38 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     final customers = ref.watch(customerListProvider);
 
     final q = _searchCtrl.text.trim().toLowerCase();
-
-    final filtered = customers.where((c) {
-      if (q.isEmpty) return true;
-      return c.name.toLowerCase().contains(q) || c.mobile.contains(q);
-    }).toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final filtered = q.isEmpty
+        ? customers
+        : customers.where((c) {
+      final name = c.name.toLowerCase();
+      final mobile = c.mobile.toLowerCase();
+      final address = c.address.toLowerCase();
+      return name.contains(q) || mobile.contains(q) || address.contains(q);
+    }).toList();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Customers'),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(58),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+        actions: [
+          IconButton(
+            tooltip: 'Add customer',
+            icon: const Icon(Icons.add),
+            onPressed: () => _openCustomerSheet(),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _openCustomerSheet(),
+        child: const Icon(Icons.add),
+      ),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: TextField(
               controller: _searchCtrl,
               decoration: InputDecoration(
-                hintText: 'Search by name / mobile',
+                hintText: 'Search name / mobile / address',
                 prefixIcon: const Icon(Icons.search),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
@@ -99,202 +214,80 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
               onChanged: (_) => setState(() {}),
             ),
           ),
-        ),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openAddOrEdit(),
-        icon: const Icon(Icons.add),
-        label: const Text('Add Customer'),
-      ),
-      body: filtered.isEmpty
-          ? const Center(child: Text('No customers yet'))
-          : ListView.separated(
-        itemCount: filtered.length,
-        separatorBuilder: (_, __) => const Divider(height: 1),
-        itemBuilder: (context, i) {
-          final c = filtered[i];
-          final displayName = c.name.trim().isEmpty ? 'Customer' : c.name;
+          Expanded(
+            child: filtered.isEmpty
+                ? const Center(child: Text('No customers yet'))
+                : ListView.separated(
+              itemCount: filtered.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (context, i) {
+                final c = filtered[i];
+                final displayName = c.name.isEmpty ? 'Customer' : c.name;
 
-          return ListTile(
-            title: Text(displayName),
-            subtitle: Text(
-              [
-                c.mobile,
-                if (c.address.trim().isNotEmpty) c.address.trim(),
-              ].join(' • '),
+                final subtitle = [
+                  c.mobile,
+                  if (c.address.trim().isNotEmpty) c.address.trim(),
+                ].join(' • ');
+
+                return ListTile(
+                  title: Text(displayName),
+                  subtitle: Text(subtitle),
+                  onTap: () => _openCustomerSheet(editing: c),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Call',
+                        icon: const Icon(Icons.call),
+                        onPressed: () => _callNumber(context, c.mobile),
+                      ),
+                      IconButton(
+                        tooltip: 'WhatsApp',
+                        icon: const Icon(Icons.chat),
+                        onPressed: () =>
+                            _openWhatsApp(context, c.mobile, c.name),
+                      ),
+                      PopupMenuButton<String>(
+                        onSelected: (v) async {
+                          if (v == 'edit') {
+                            await _openCustomerSheet(editing: c);
+                          } else if (v == 'delete') {
+                            final ok = await AppConfirmDialog.show(
+                              context,
+                              title: 'Delete customer?',
+                              message:
+                              'This customer will be permanently deleted.',
+                              confirmText: 'Delete',
+                              isDanger: true,
+                            );
+                            if (!ok) return;
+
+                            await ref
+                                .read(customerListProvider.notifier)
+                                .deleteCustomer(c.id);
+                            if (context.mounted) {
+                              AppSnack.show(context, 'Customer deleted');
+                            }
+                          }
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: 'edit',
+                            child: Text('Edit'),
+                          ),
+                          PopupMenuItem(
+                            value: 'delete',
+                            child: Text('Delete'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
-            trailing: Wrap(
-              spacing: 6,
-              children: [
-                IconButton(
-                  tooltip: 'Call',
-                  icon: const Icon(Icons.call),
-                  onPressed: () => _callNumber(context, c.mobile),
-                ),
-                IconButton(
-                  tooltip: 'WhatsApp',
-                  icon: const Icon(Icons.chat),
-                  onPressed: () => _openWhatsApp(context, c.mobile, c.name),
-                ),
-                IconButton(
-                  tooltip: 'Edit',
-                  icon: const Icon(Icons.edit_outlined),
-                  onPressed: () => _openAddOrEdit(customer: c),
-                ),
-                IconButton(
-                  tooltip: 'Delete',
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () async {
-                    final ok = await AppConfirmDialog.show(
-                      context,
-                      title: 'Delete customer?',
-                      message: 'This customer will be permanently deleted.',
-                      confirmText: 'Delete',
-                      isDanger: true,
-                    );
-
-                    if (!ok) return;
-
-                    await ref
-                        .read(customerListProvider.notifier)
-                        .deleteCustomer(c.id);
-
-                    if (context.mounted) {
-                      AppSnack.show(context, 'Customer deleted');
-                    }
-                  },
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _CustomerFormSheet extends ConsumerStatefulWidget {
-  final Customer? customer;
-
-  const _CustomerFormSheet({this.customer});
-
-  @override
-  ConsumerState<_CustomerFormSheet> createState() => _CustomerFormSheetState();
-}
-
-class _CustomerFormSheetState extends ConsumerState<_CustomerFormSheet> {
-  late final TextEditingController nameCtrl;
-  late final TextEditingController mobileCtrl;
-  late final TextEditingController addressCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-    final c = widget.customer;
-    nameCtrl = TextEditingController(text: c?.name ?? '');
-    mobileCtrl = TextEditingController(text: c?.mobile ?? '');
-    addressCtrl = TextEditingController(text: c?.address ?? '');
-  }
-
-  @override
-  void dispose() {
-    nameCtrl.dispose();
-    mobileCtrl.dispose();
-    addressCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isEdit = widget.customer != null;
-
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          top: 12,
-          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              isEdit ? 'Edit Customer' : 'Add Customer',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 12),
-
-            TextField(
-              controller: nameCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Name',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 10),
-
-            TextField(
-              controller: mobileCtrl,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(
-                labelText: 'Mobile (unique)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 10),
-
-            TextField(
-              controller: addressCtrl,
-              minLines: 2,
-              maxLines: 4,
-              decoration: const InputDecoration(
-                labelText: 'Address (optional)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-
-            const SizedBox(height: 14),
-
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: () async {
-                  final name = nameCtrl.text.trim();
-                  final mobile = mobileCtrl.text.trim();
-                  final address = addressCtrl.text.trim();
-
-                  if (mobile.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Mobile number required')),
-                    );
-                    return;
-                  }
-
-                  if (isEdit) {
-                    await ref.read(customerListProvider.notifier).updateCustomer(
-                      id: widget.customer!.id,
-                      name: name,
-                      mobile: mobile,
-                      address: address,
-                    );
-                  } else {
-                    await ref.read(customerListProvider.notifier).addCustomer(
-                      name: name,
-                      mobile: mobile,
-                      address: address,
-                    );
-                  }
-
-                  if (mounted) Navigator.pop(context);
-                },
-                child: Text(isEdit ? 'Save' : 'Add'),
-              ),
-            ),
-
-            const SizedBox(height: 8),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

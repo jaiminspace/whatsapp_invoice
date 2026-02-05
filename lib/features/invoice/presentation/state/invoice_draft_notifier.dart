@@ -15,10 +15,13 @@ class InvoiceDraftNotifier extends Notifier<InvoiceDraft> {
   // ✅ NEW: load invoice into draft for editing
   void loadFromInvoice(Invoice invoice) {
     state = invoice.draft.copyWith(
-      // make sure invoiceDateTime stays same as invoice.createdAt for edit UI
       invoiceDateTime: invoice.createdAt,
+      items: invoice.draft.items
+          .map((e) => e.copyWith(name: e.name.trim()))
+          .toList(),
     );
   }
+
 
   void setCustomerName(String v) => state = state.copyWith(customerName: v.trim());
   void setCustomerMobile(String v) => state = state.copyWith(customerMobile: v.trim());

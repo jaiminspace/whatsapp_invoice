@@ -4,89 +4,124 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:hive/hive.dart';
 
-import '../../data/business_local_repo.dart';
+import '../../domain/activity_log_model.dart';
 import '../../domain/business_entity.dart';
+import 'activity_log_notifier.dart';
 
-final businessRepoProvider = Provider<BusinessLocalRepo>((ref) {
-  final box = Hive.box('businesses'); // MUST be opened in main()
-  return BusinessLocalRepo(box);
-});
+final businessBoxProvider = Provider<Box>((ref) => Hive.box('businesses'));
 
 final businessListProvider =
 NotifierProvider<BusinessListNotifier, List<BusinessEntity>>(
   BusinessListNotifier.new,
 );
 
-final selectedBusinessIdProvider = StateProvider<String>((ref) => '');
+final selectedBusinessIdProvider = StateProvider<String?>((ref) => null);
 
 final selectedBusinessProvider = Provider<BusinessEntity?>((ref) {
   final list = ref.watch(businessListProvider);
-  final selectedId = ref.watch(selectedBusinessIdProvider);
+  final id = ref.watch(selectedBusinessIdProvider);
 
   if (list.isEmpty) return null;
-  if (selectedId.trim().isEmpty) return list.first;
+  if (id == null || id.trim().isEmpty) return list.first;
 
-  return list.firstWhere(
-        (b) => b.id == selectedId,
-    orElse: () => list.first,
-  );
+  return list.firstWhere((b) => b.id == id, orElse: () => list.first);
 });
 
 class BusinessListNotifier extends Notifier<List<BusinessEntity>> {
-  late final BusinessLocalRepo repo;
   StreamSubscription? _sub;
 
   @override
   List<BusinessEntity> build() {
-    repo = ref.read(businessRepoProvider);
+    final box = ref.read(businessBoxProvider);
 
-    final box = Hive.box('businesses');
+    List<BusinessEntity> readAll() {
+      final list = box.values
+          .whereType<Map>()
+          .map((e) => BusinessEntity.fromJson(e))
+          .toList();
 
-    // initial
-    final initial = List<BusinessEntity>.from(repo.getAll());
+      list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      return list;
+    }
 
-    // auto refresh on Hive changes
+    final initial = readAll();
+
     _sub?.cancel();
     _sub = box.watch().listen((_) {
-      state = List<BusinessEntity>.from(repo.getAll());
+      state = readAll();
     });
 
     ref.onDispose(() => _sub?.cancel());
-
     return initial;
   }
 
   BusinessEntity? getById(String id) {
     try {
-      return state.firstWhere((b) => b.id == id);
+      return state.firstWhere((e) => e.id == id);
     } catch (_) {
       return null;
     }
   }
 
-  Future<void> add(BusinessEntity business) async {
-    await repo.save(business);
-    state = List<BusinessEntity>.from(repo.getAll());
+  Future<void> addBusiness(BusinessEntity b) async {
+    final box = ref.read(businessBoxProvider);
 
-    final selected = ref.read(selectedBusinessIdProvider);
-    if (selected.trim().isEmpty) {
-      ref.read(selectedBusinessIdProvider.notifier).state = business.id;
-    }
+    // ✅ extra safety: don’t overwrite, don’t double-add same id
+    if (box.containsKey(b.id)) return;
+
+    await box.put(b.id, b.toJson());
+
+    await ref.read(activityLogProvider.notifier).addLog(
+      ActivityLog.create(
+        entity: LogEntity.business,
+        action: LogAction.create,
+        entityId: b.id,
+        title: 'Business created',
+        message: 'Business "${b.name.isEmpty ? 'Business' : b.name}" added.',
+        meta: {'name': b.name, 'upiId': b.upiId, 'phone': b.phone},
+      ),
+    );
   }
 
-  Future<void> update(BusinessEntity business) async {
-    await repo.save(business);
-    state = List<BusinessEntity>.from(repo.getAll());
+  Future<void> updateBusiness(BusinessEntity b) async {
+    final box = ref.read(businessBoxProvider);
+    await box.put(b.id, b.toJson());
+
+    await ref.read(activityLogProvider.notifier).addLog(
+      ActivityLog.create(
+        entity: LogEntity.business,
+        action: LogAction.update,
+        entityId: b.id,
+        title: 'Business updated',
+        message:
+        'Business "${b.name.isEmpty ? 'Business' : b.name}" updated.',
+        meta: {'name': b.name, 'upiId': b.upiId, 'phone': b.phone},
+      ),
+    );
   }
 
-  Future<void> delete(String id) async {
-    await repo.delete(id);
-    state = List<BusinessEntity>.from(repo.getAll());
+  Future<void> deleteBusiness(String id) async {
+    final old = getById(id);
+    final box = ref.read(businessBoxProvider);
 
-    final selected = ref.read(selectedBusinessIdProvider);
-    if (selected == id) {
-      ref.read(selectedBusinessIdProvider.notifier).state =
-      state.isNotEmpty ? state.first.id : '';
-    }
+    await box.delete(id);
+
+    await ref.read(activityLogProvider.notifier).addLog(
+      ActivityLog.create(
+        entity: LogEntity.business,
+        action: LogAction.delete,
+        entityId: id,
+        title: 'Business deleted',
+        message: old == null
+            ? 'Business deleted.'
+            : 'Business "${old.name.isEmpty ? 'Business' : old.name}" deleted.',
+        meta: {'name': old?.name ?? ''},
+      ),
+    );
   }
+
+  // ✅ aliases so your UI can call add/update/delete
+  Future<void> add(BusinessEntity b) => addBusiness(b);
+  Future<void> update(BusinessEntity b) => updateBusiness(b);
+  Future<void> delete(String id) => deleteBusiness(id);
 }

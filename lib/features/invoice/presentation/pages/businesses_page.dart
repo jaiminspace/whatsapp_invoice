@@ -12,156 +12,12 @@ class BusinessesPage extends ConsumerWidget {
       WidgetRef ref, {
         BusinessEntity? editing,
       }) async {
-    final nameCtrl = TextEditingController(text: editing?.name ?? '');
-    final upiCtrl = TextEditingController(text: editing?.upiId ?? '');
-    final phoneCtrl = TextEditingController(text: editing?.phone ?? '');
-    final addressCtrl = TextEditingController(text: editing?.address ?? '');
-
-    InvoiceNumberMode mode = editing?.invoiceNumberMode ?? InvoiceNumberMode.auto;
-
-    final result = await showModalBottomSheet<bool>(
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) {
-        return SafeArea(
-          child: Padding(
-            padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              top: 12,
-              bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  editing == null ? 'Add Business' : 'Edit Business',
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 12),
-
-                TextField(
-                  controller: nameCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Business name *',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 10),
-
-                TextField(
-                  controller: upiCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'UPI ID (optional)',
-                    border: OutlineInputBorder(),
-                    hintText: 'e.g. jaimin@upi',
-                  ),
-                ),
-                const SizedBox(height: 10),
-
-                TextField(
-                  controller: phoneCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Phone (optional)',
-                    border: OutlineInputBorder(),
-                  ),
-                  keyboardType: TextInputType.phone,
-                ),
-                const SizedBox(height: 10),
-
-                TextField(
-                  controller: addressCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Address (optional)',
-                    border: OutlineInputBorder(),
-                  ),
-                  maxLines: 2,
-                ),
-                const SizedBox(height: 10),
-
-                DropdownButtonFormField<InvoiceNumberMode>(
-                  value: mode,
-                  isExpanded: true, // ✅ fixes overflow
-                  decoration: const InputDecoration(
-                    labelText: 'Invoice numbering',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: const [
-                    DropdownMenuItem(
-                      value: InvoiceNumberMode.auto,
-                      child: Text(
-                        'Auto (INV-0001)',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    DropdownMenuItem(
-                      value: InvoiceNumberMode.manual,
-                      child: Text(
-                        'Manual',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                  onChanged: (v) => mode = v ?? InvoiceNumberMode.auto,
-                ),
-
-                const SizedBox(height: 14),
-
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text('Cancel'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        child: Text(editing == null ? 'Save' : 'Update'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+      builder: (_) => _BusinessFormSheet(editing: editing),
     );
-
-    if (result != true) return;
-
-    final name = nameCtrl.text.trim();
-    if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Business name is required')),
-      );
-      return;
-    }
-
-    if (editing == null) {
-      final newBusiness = BusinessEntity.create(name).copyWith(
-        upiId: upiCtrl.text.trim(),
-        phone: phoneCtrl.text.trim(),
-        address: addressCtrl.text.trim(),
-        invoiceNumberMode: mode,
-      );
-
-      await ref.read(businessListProvider.notifier).add(newBusiness);
-    } else {
-      final updated = editing.copyWith(
-        name: name,
-        upiId: upiCtrl.text.trim(),
-        phone: phoneCtrl.text.trim(),
-        address: addressCtrl.text.trim(),
-        invoiceNumberMode: mode,
-      );
-
-      await ref.read(businessListProvider.notifier).update(updated);
-    }
   }
 
   Future<void> _confirmDelete(
@@ -225,7 +81,8 @@ class BusinessesPage extends ConsumerWidget {
               const SizedBox(height: 10),
               const Text(
                 'No businesses yet',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                style:
+                TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
               const Text(
@@ -248,8 +105,12 @@ class BusinessesPage extends ConsumerWidget {
         separatorBuilder: (_, __) => const SizedBox(height: 10),
         itemBuilder: (context, i) {
           final b = businesses[i];
-          final isSelected = (selectedId.trim().isNotEmpty && selectedId == b.id) ||
-              (selectedId.trim().isEmpty && i == 0);
+
+          final isSelected = (selectedId != null &&
+              selectedId.trim().isNotEmpty &&
+              selectedId == b.id) ||
+              ((selectedId == null || selectedId.trim().isEmpty) &&
+                  i == 0);
 
           return Container(
             decoration: BoxDecoration(
@@ -321,6 +182,189 @@ class BusinessesPage extends ConsumerWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// ✅ separate sheet with saving guard (prevents double add)
+class _BusinessFormSheet extends ConsumerStatefulWidget {
+  final BusinessEntity? editing;
+  const _BusinessFormSheet({this.editing});
+
+  @override
+  ConsumerState<_BusinessFormSheet> createState() => _BusinessFormSheetState();
+}
+
+class _BusinessFormSheetState extends ConsumerState<_BusinessFormSheet> {
+  late final TextEditingController nameCtrl;
+  late final TextEditingController upiCtrl;
+  late final TextEditingController phoneCtrl;
+  late final TextEditingController addressCtrl;
+
+  late InvoiceNumberMode mode;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.editing;
+    nameCtrl = TextEditingController(text: e?.name ?? '');
+    upiCtrl = TextEditingController(text: e?.upiId ?? '');
+    phoneCtrl = TextEditingController(text: e?.phone ?? '');
+    addressCtrl = TextEditingController(text: e?.address ?? '');
+    mode = e?.invoiceNumberMode ?? InvoiceNumberMode.auto;
+  }
+
+  @override
+  void dispose() {
+    nameCtrl.dispose();
+    upiCtrl.dispose();
+    phoneCtrl.dispose();
+    addressCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+
+    final name = nameCtrl.text.trim();
+    if (name.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Business name is required')),
+        );
+      }
+      setState(() => _saving = false);
+      return;
+    }
+
+    if (widget.editing == null) {
+      final newBusiness = BusinessEntity.create(name).copyWith(
+        upiId: upiCtrl.text.trim(),
+        phone: phoneCtrl.text.trim(),
+        address: addressCtrl.text.trim(),
+        invoiceNumberMode: mode,
+      );
+
+      await ref.read(businessListProvider.notifier).add(newBusiness);
+    } else {
+      final updated = widget.editing!.copyWith(
+        name: name,
+        upiId: upiCtrl.text.trim(),
+        phone: phoneCtrl.text.trim(),
+        address: addressCtrl.text.trim(),
+        invoiceNumberMode: mode,
+      );
+
+      await ref.read(businessListProvider.notifier).update(updated);
+    }
+
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEdit = widget.editing != null;
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 12,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              isEdit ? 'Edit Business' : 'Add Business',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 12),
+
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Business name *',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            TextField(
+              controller: upiCtrl,
+              decoration: const InputDecoration(
+                labelText: 'UPI ID (optional)',
+                border: OutlineInputBorder(),
+                hintText: 'e.g. jaimin@upi',
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            TextField(
+              controller: phoneCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Phone (optional)',
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.phone,
+            ),
+            const SizedBox(height: 10),
+
+            TextField(
+              controller: addressCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Address (optional)',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 2,
+            ),
+            const SizedBox(height: 10),
+
+            DropdownButtonFormField<InvoiceNumberMode>(
+              value: mode,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Invoice numbering',
+                border: OutlineInputBorder(),
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: InvoiceNumberMode.auto,
+                  child: Text('Auto (INV-0001)', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: InvoiceNumberMode.manual,
+                  child: Text('Manual', overflow: TextOverflow.ellipsis),
+                ),
+              ],
+              onChanged: _saving ? null : (v) => setState(() => mode = v ?? mode),
+            ),
+
+            const SizedBox(height: 14),
+
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _saving ? null : () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: _saving ? null : _save,
+                    child: Text(_saving ? 'Saving...' : (isEdit ? 'Update' : 'Save')),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

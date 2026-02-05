@@ -76,7 +76,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     final invoices =
     importInvoicesFromCsvText(utf8.decode(result.files.first.bytes!));
 
-    await ref.read(invoiceListProvider.notifier).importMany(invoices);
+    //await ref.read(invoiceListProvider.notifier).importMany(invoices);
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Imported ${invoices.length} invoices')),
