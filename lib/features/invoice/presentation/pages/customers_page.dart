@@ -2,14 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../domain/customer_model.dart';
 import '../state/customer_notifier.dart';
-import '../state/invoice_list_notifier.dart';
+import '../../domain/customer_model.dart';
 
 import '../../../../core/ui/app_confirm_dialog.dart';
 import '../../../../core/ui/app_snack.dart';
-
-enum CustomerSortMode { az, lastUsed, topAmount }
 
 class CustomersPage extends ConsumerStatefulWidget {
   const CustomersPage({super.key});
@@ -20,7 +17,6 @@ class CustomersPage extends ConsumerStatefulWidget {
 
 class _CustomersPageState extends ConsumerState<CustomersPage> {
   final _searchCtrl = TextEditingController();
-  CustomerSortMode _sortMode = CustomerSortMode.az;
 
   @override
   void dispose() {
@@ -42,7 +38,11 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     }
   }
 
-  Future<void> _openWhatsApp(BuildContext context, String mobile, String name) async {
+  Future<void> _openWhatsApp(
+      BuildContext context,
+      String mobile,
+      String name,
+      ) async {
     final m = mobile.replaceAll(RegExp(r'\s+'), '');
     if (m.isEmpty) return;
 
@@ -57,24 +57,174 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     }
   }
 
-  Future<void> _openAddEditDialog({
-    required BuildContext context,
-    String? editingId,
-    String initialName = '',
-    String initialMobile = '',
+  Future<void> _openAddOrEdit({
+    Customer? customer,
   }) async {
-    final nameCtrl = TextEditingController(text: initialName);
-    final mobileCtrl = TextEditingController(text: initialMobile);
-
-    final isEdit = editingId != null;
-
-    final ok = await showDialog<bool>(
+    await showModalBottomSheet(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text(isEdit ? 'Edit Customer/Client' : 'Add Customer/Client'),
-        content: Column(
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _CustomerFormSheet(customer: customer),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final customers = ref.watch(customerListProvider);
+
+    final q = _searchCtrl.text.trim().toLowerCase();
+
+    final filtered = customers.where((c) {
+      if (q.isEmpty) return true;
+      return c.name.toLowerCase().contains(q) || c.mobile.contains(q);
+    }).toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Customers'),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(58),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: InputDecoration(
+                hintText: 'Search by name / mobile',
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _openAddOrEdit(),
+        icon: const Icon(Icons.add),
+        label: const Text('Add Customer'),
+      ),
+      body: filtered.isEmpty
+          ? const Center(child: Text('No customers yet'))
+          : ListView.separated(
+        itemCount: filtered.length,
+        separatorBuilder: (_, __) => const Divider(height: 1),
+        itemBuilder: (context, i) {
+          final c = filtered[i];
+          final displayName = c.name.trim().isEmpty ? 'Customer' : c.name;
+
+          return ListTile(
+            title: Text(displayName),
+            subtitle: Text(
+              [
+                c.mobile,
+                if (c.address.trim().isNotEmpty) c.address.trim(),
+              ].join(' • '),
+            ),
+            trailing: Wrap(
+              spacing: 6,
+              children: [
+                IconButton(
+                  tooltip: 'Call',
+                  icon: const Icon(Icons.call),
+                  onPressed: () => _callNumber(context, c.mobile),
+                ),
+                IconButton(
+                  tooltip: 'WhatsApp',
+                  icon: const Icon(Icons.chat),
+                  onPressed: () => _openWhatsApp(context, c.mobile, c.name),
+                ),
+                IconButton(
+                  tooltip: 'Edit',
+                  icon: const Icon(Icons.edit_outlined),
+                  onPressed: () => _openAddOrEdit(customer: c),
+                ),
+                IconButton(
+                  tooltip: 'Delete',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () async {
+                    final ok = await AppConfirmDialog.show(
+                      context,
+                      title: 'Delete customer?',
+                      message: 'This customer will be permanently deleted.',
+                      confirmText: 'Delete',
+                      isDanger: true,
+                    );
+
+                    if (!ok) return;
+
+                    await ref
+                        .read(customerListProvider.notifier)
+                        .deleteCustomer(c.id);
+
+                    if (context.mounted) {
+                      AppSnack.show(context, 'Customer deleted');
+                    }
+                  },
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _CustomerFormSheet extends ConsumerStatefulWidget {
+  final Customer? customer;
+
+  const _CustomerFormSheet({this.customer});
+
+  @override
+  ConsumerState<_CustomerFormSheet> createState() => _CustomerFormSheetState();
+}
+
+class _CustomerFormSheetState extends ConsumerState<_CustomerFormSheet> {
+  late final TextEditingController nameCtrl;
+  late final TextEditingController mobileCtrl;
+  late final TextEditingController addressCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    final c = widget.customer;
+    nameCtrl = TextEditingController(text: c?.name ?? '');
+    mobileCtrl = TextEditingController(text: c?.mobile ?? '');
+    addressCtrl = TextEditingController(text: c?.address ?? '');
+  }
+
+  @override
+  void dispose() {
+    nameCtrl.dispose();
+    mobileCtrl.dispose();
+    addressCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEdit = widget.customer != null;
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 12,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+        ),
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Text(
+              isEdit ? 'Edit Customer' : 'Add Customer',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 12),
+
             TextField(
               controller: nameCtrl,
               decoration: const InputDecoration(
@@ -83,299 +233,66 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
               ),
             ),
             const SizedBox(height: 10),
+
             TextField(
               controller: mobileCtrl,
               keyboardType: TextInputType.phone,
               decoration: const InputDecoration(
-                labelText: 'Mobile',
+                labelText: 'Mobile (unique)',
                 border: OutlineInputBorder(),
               ),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(isEdit ? 'Update' : 'Add'),
-          ),
-        ],
-      ),
-    );
+            const SizedBox(height: 10),
 
-    if (ok != true) return;
-
-    final name = nameCtrl.text.trim();
-    final mobile = mobileCtrl.text.trim();
-
-    if (mobile.isEmpty) {
-      if (context.mounted) AppSnack.show(context, 'Mobile is required');
-      return;
-    }
-
-    if (isEdit) {
-      await ref.read(customerListProvider.notifier).updateCustomer(
-        id: editingId!,
-        name: name,
-        mobile: mobile,
-      );
-      if (context.mounted) AppSnack.show(context, 'Customer updated');
-    } else {
-      await ref.read(customerListProvider.notifier).addCustomer(
-        name: name,
-        mobile: mobile,
-      );
-      if (context.mounted) AppSnack.show(context, 'Customer added');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final customers = ref.watch(customerListProvider);
-    final invoices = ref.watch(invoiceListProvider);
-
-    // --------- compute totals + last used from invoices ----------
-    final totalByMobile = <String, double>{};
-    final lastUsedByMobile = <String, DateTime>{};
-
-    for (final inv in invoices) {
-      final m = inv.draft.customerMobile.trim();
-      if (m.isEmpty) continue;
-
-      totalByMobile[m] = (totalByMobile[m] ?? 0.0) + inv.total;
-
-      final existing = lastUsedByMobile[m];
-      final t = inv.createdAt;
-      if (existing == null || t.isAfter(existing)) {
-        lastUsedByMobile[m] = t;
-      }
-    }
-
-    final query = _searchCtrl.text.trim().toLowerCase();
-
-    List<Customer> filtered = customers.where((c) {
-      if (query.isEmpty) return true;
-      final name = c.name.toLowerCase();
-      final mobile = c.mobile.toLowerCase();
-      return name.contains(query) || mobile.contains(query);
-    }).toList();
-
-    // --------- sorting ----------
-    filtered.sort((a, b) {
-      switch (_sortMode) {
-        case CustomerSortMode.az:
-          return (a.name.isEmpty ? a.mobile : a.name)
-              .toLowerCase()
-              .compareTo((b.name.isEmpty ? b.mobile : b.name).toLowerCase());
-
-        case CustomerSortMode.lastUsed:
-          final la = lastUsedByMobile[a.mobile.trim()] ?? DateTime.fromMillisecondsSinceEpoch(0);
-          final lb = lastUsedByMobile[b.mobile.trim()] ?? DateTime.fromMillisecondsSinceEpoch(0);
-          return lb.compareTo(la);
-
-        case CustomerSortMode.topAmount:
-          final ta = totalByMobile[a.mobile.trim()] ?? 0.0;
-          final tb = totalByMobile[b.mobile.trim()] ?? 0.0;
-          return tb.compareTo(ta);
-      }
-    });
-
-    // --------- quick sections ----------
-    final lastUsedList = customers.toList()
-      ..sort((a, b) {
-        final la = lastUsedByMobile[a.mobile.trim()] ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final lb = lastUsedByMobile[b.mobile.trim()] ?? DateTime.fromMillisecondsSinceEpoch(0);
-        return lb.compareTo(la);
-      });
-    final lastUsedTop = lastUsedList.take(5).toList();
-
-    final topAmountList = customers.toList()
-      ..sort((a, b) {
-        final ta = totalByMobile[a.mobile.trim()] ?? 0.0;
-        final tb = totalByMobile[b.mobile.trim()] ?? 0.0;
-        return tb.compareTo(ta);
-      });
-    final topAmountTop = topAmountList.take(5).toList();
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Customers / Clients'),
-        actions: [
-          PopupMenuButton<CustomerSortMode>(
-            tooltip: 'Sort',
-            initialValue: _sortMode,
-            onSelected: (v) => setState(() => _sortMode = v),
-            itemBuilder: (_) => const [
-              PopupMenuItem(
-                value: CustomerSortMode.az,
-                child: Text('Sort: A-Z'),
-              ),
-              PopupMenuItem(
-                value: CustomerSortMode.lastUsed,
-                child: Text('Sort: Last used'),
-              ),
-              PopupMenuItem(
-                value: CustomerSortMode.topAmount,
-                child: Text('Sort: Top amount'),
-              ),
-            ],
-            icon: const Icon(Icons.sort),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _openAddEditDialog(context: context),
-        child: const Icon(Icons.add),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            // Search
             TextField(
-              controller: _searchCtrl,
+              controller: addressCtrl,
+              minLines: 2,
+              maxLines: 4,
               decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search),
-                hintText: 'Search name or mobile...',
+                labelText: 'Address (optional)',
                 border: OutlineInputBorder(),
               ),
-              onChanged: (_) => setState(() {}),
             ),
-            const SizedBox(height: 12),
 
-            // Quick chips / sections
-            // if (customers.isNotEmpty) ...[
-            //   Align(
-            //     alignment: Alignment.centerLeft,
-            //     child: Text(
-            //       'Quick Access',
-            //       style: Theme.of(context).textTheme.titleMedium,
-            //     ),
-            //   ),
-            //   const SizedBox(height: 8),
-            //
-            //   // Last used
-            //   if (lastUsedTop.isNotEmpty)
-            //     Card(
-            //       child: Padding(
-            //         padding: const EdgeInsets.all(12),
-            //         child: Column(
-            //           crossAxisAlignment: CrossAxisAlignment.start,
-            //           children: [
-            //             const Text('Last used customers'),
-            //             const SizedBox(height: 8),
-            //             Wrap(
-            //               spacing: 8,
-            //               runSpacing: 8,
-            //               children: lastUsedTop.map((c) {
-            //                 final n = c.name.isEmpty ? c.mobile : c.name;
-            //                 return ActionChip(
-            //                   label: Text(n),
-            //                   onPressed: () => _openAddEditDialog(
-            //                     context: context,
-            //                     editingId: c.id,
-            //                     initialName: c.name,
-            //                     initialMobile: c.mobile,
-            //                   ),
-            //                 );
-            //               }).toList(),
-            //             ),
-            //           ],
-            //         ),
-            //       ),
-            //     ),
-            //
-            //   // Top amount
-            //   if (topAmountTop.isNotEmpty)
-            //     Card(
-            //       child: Padding(
-            //         padding: const EdgeInsets.all(12),
-            //         child: Column(
-            //           crossAxisAlignment: CrossAxisAlignment.start,
-            //           children: [
-            //             const Text('Top customers (amount)'),
-            //             const SizedBox(height: 8),
-            //             Column(
-            //               children: topAmountTop.map((c) {
-            //                 final amount = totalByMobile[c.mobile.trim()] ?? 0.0;
-            //                 return ListTile(
-            //                   dense: true,
-            //                   contentPadding: EdgeInsets.zero,
-            //                   title: Text(c.name.isEmpty ? c.mobile : c.name),
-            //                   subtitle: Text(c.mobile),
-            //                   trailing: Text('₹${amount.toStringAsFixed(0)}'),
-            //                 );
-            //               }).toList(),
-            //             ),
-            //           ],
-            //         ),
-            //       ),
-            //     ),
-            // ],
-            //
-            // const SizedBox(height: 8),
+            const SizedBox(height: 14),
 
-            // List
-            Expanded(
-              child: filtered.isEmpty
-                  ? const Center(child: Text('No customers found'))
-                  : ListView.separated(
-                itemCount: filtered.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
-                itemBuilder: (context, i) {
-                  final c = filtered[i];
-                  final displayName = c.name.isEmpty ? 'Customer/Client' : c.name;
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: () async {
+                  final name = nameCtrl.text.trim();
+                  final mobile = mobileCtrl.text.trim();
+                  final address = addressCtrl.text.trim();
 
-                  final amount = totalByMobile[c.mobile.trim()] ?? 0.0;
+                  if (mobile.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Mobile number required')),
+                    );
+                    return;
+                  }
 
-                  return ListTile(
-                    title: Text(displayName),
-                    subtitle: Text('${c.mobile}  •  Total: ₹${amount.toStringAsFixed(0)}'),
-                    onTap: () => _openAddEditDialog(
-                      context: context,
-                      editingId: c.id,
-                      initialName: c.name,
-                      initialMobile: c.mobile,
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          tooltip: 'Call',
-                          icon: const Icon(Icons.call),
-                          onPressed: () => _callNumber(context, c.mobile),
-                        ),
-                        IconButton(
-                          tooltip: 'WhatsApp',
-                          icon: const Icon(Icons.chat),
-                          onPressed: () => _openWhatsApp(context, c.mobile, c.name),
-                        ),
-                        IconButton(
-                          tooltip: 'Delete',
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: () async {
-                            final ok = await AppConfirmDialog.show(
-                              context,
-                              title: 'Delete customer?',
-                              message: 'This customer will be permanently deleted.',
-                              confirmText: 'Delete',
-                              isDanger: true,
-                            );
-                            if (!ok) return;
+                  if (isEdit) {
+                    await ref.read(customerListProvider.notifier).updateCustomer(
+                      id: widget.customer!.id,
+                      name: name,
+                      mobile: mobile,
+                      address: address,
+                    );
+                  } else {
+                    await ref.read(customerListProvider.notifier).addCustomer(
+                      name: name,
+                      mobile: mobile,
+                      address: address,
+                    );
+                  }
 
-                            await ref.read(customerListProvider.notifier).deleteCustomer(c.id);
-                            if (context.mounted) AppSnack.show(context, 'Customer deleted');
-                          },
-                        ),
-                      ],
-                    ),
-                  );
+                  if (mounted) Navigator.pop(context);
                 },
+                child: Text(isEdit ? 'Save' : 'Add'),
               ),
             ),
+
+            const SizedBox(height: 8),
           ],
         ),
       ),
