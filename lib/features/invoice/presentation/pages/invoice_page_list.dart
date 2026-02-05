@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/ui/app_confirm_dialog.dart';
+import '../../../../core/ui/create_invoice_gate.dart';
 import '../../../../core/ui/first_run_setup_sheet.dart';
 
 import '../../domain/invoice_models.dart';
@@ -33,24 +34,38 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
   }
 
   Future<void> _openCreate({Invoice? editInvoice}) async {
+    final ok = await CreateInvoiceGate.ensureReady(context, ref);
+    if (!ok) return;
+
+    // ✅ If editing: load draft from invoice before opening page
     if (editInvoice != null) {
       ref.read(invoiceDraftProvider.notifier).loadFromInvoice(editInvoice);
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CreateInvoicePage(
+            isEdit: true,
+            editingInvoiceId: editInvoice.id,
+          ),
+        ),
+      );
+    } else {
+      // ✅ New invoice
+      ref.read(invoiceDraftProvider.notifier).reset();
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const CreateInvoicePage()),
+      );
     }
 
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => CreateInvoicePage(
-          isEdit: editInvoice != null,
-          editingInvoiceId: editInvoice?.id,
-        ),
-      ),
-    );
-
+    // Optional UX reset
     _searchCtrl.clear();
     ref.read(invoiceSearchProvider.notifier).state = '';
     ref.read(invoiceFilterProvider.notifier).state = InvoiceFilter.all;
   }
+
 
   Future<void> _openDetail(Invoice inv) async {
     await Navigator.push(
