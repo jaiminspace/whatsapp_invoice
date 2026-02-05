@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/ui/app_phone_field.dart';
 import '../../domain/business_entity.dart';
 import '../state/business_list_notifier.dart';
 
@@ -304,13 +305,10 @@ class _BusinessFormSheetState extends ConsumerState<_BusinessFormSheet> {
             ),
             const SizedBox(height: 10),
 
-            TextField(
-              controller: phoneCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Phone (optional)',
-                border: OutlineInputBorder(),
-              ),
-              keyboardType: TextInputType.phone,
+            AppPhoneField(
+              initialText: phoneCtrl.text.replaceAll('+', ''),
+              label: 'Business phone (optional)',
+              onChangedE164: (v) => phoneCtrl.text = v, // stores +91...
             ),
             const SizedBox(height: 10),
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../core/ui/app_phone_field.dart';
 import '../state/customer_notifier.dart';
 import '../../domain/customer_model.dart';
 import '../../../../core/ui/app_confirm_dialog.dart';
@@ -24,7 +25,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
   }
 
   Future<void> _callNumber(BuildContext context, String mobile) async {
-    final m = mobile.trim();
+    final m = mobile.replaceAll(RegExp(r'\s+'), '').trim();
     if (m.isEmpty) return;
 
     final uri = Uri(scheme: 'tel', path: m);
@@ -37,12 +38,8 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     }
   }
 
-  Future<void> _openWhatsApp(
-      BuildContext context,
-      String mobile,
-      String name,
-      ) async {
-    final m = mobile.replaceAll(RegExp(r'\s+'), '');
+  Future<void> _openWhatsApp(BuildContext context, String mobile, String name) async {
+    final m = mobile.replaceAll('+', '').replaceAll(RegExp(r'\s+'), '').trim();
     if (m.isEmpty) return;
 
     final msg = Uri.encodeComponent('Hi ${name.isEmpty ? 'there' : name},');
@@ -55,6 +52,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
       );
     }
   }
+
 
   Future<void> _openCustomerSheet({
     Customer? editing,
@@ -95,13 +93,10 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
                   ),
                 ),
                 const SizedBox(height: 10),
-                TextField(
-                  controller: mobileCtrl,
-                  keyboardType: TextInputType.phone,
-                  decoration: const InputDecoration(
-                    labelText: 'Mobile *',
-                    border: OutlineInputBorder(),
-                  ),
+                AppPhoneField(
+                  initialText: mobileCtrl.text.replaceAll('+', ''),
+                  onChangedE164: (v) => mobileCtrl.text = v,
+                  label: 'Mobile number',
                 ),
                 const SizedBox(height: 10),
                 TextField(

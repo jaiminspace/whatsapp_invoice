@@ -7,6 +7,7 @@ import 'package:whatsapp_invoice/features/invoice/presentation/state/invoice_fil
 import 'package:whatsapp_invoice/features/invoice/presentation/state/invoice_list_notifier.dart';
 
 import '../../../../core/ui/app_confirm_dialog.dart';
+import '../../../../core/ui/app_phone_field.dart';
 import '../../domain/business_profile.dart';
 import '../state/business_profile_notifier.dart';
 
@@ -257,14 +258,13 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
           ),
           const SizedBox(height: 12),
 
-          TextField(
-            controller: _mobileCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Customer / Client mobile',
-              border: OutlineInputBorder(),
-            ),
-            keyboardType: TextInputType.phone,
-            onChanged: notifier.setCustomerMobile,
+          AppPhoneField(
+            initialText: _mobileCtrl.text.replaceAll('+', '').replaceAll(RegExp(r'^\d{1,3}'), ''),
+            onChangedE164: (v) {
+              _mobileCtrl.text = v;        // store +91...
+              notifier.setCustomerMobile(v);
+            },
+            label: 'Customer / Client mobile',
           ),
 
           const SizedBox(height: 18),
