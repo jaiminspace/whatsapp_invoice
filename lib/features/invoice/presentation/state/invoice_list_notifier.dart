@@ -5,13 +5,11 @@ import 'package:hive/hive.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../data/invoice_local_repo.dart';
+import '../../domain/business_entity.dart';
 import '../../domain/invoice_models.dart';
-
 import '../../domain/activity_log_model.dart';
 import 'activity_log_notifier.dart';
-
 import 'business_list_notifier.dart';
-import '../../domain/business_entity.dart';
 
 final invoiceRepoProvider = Provider<InvoiceLocalRepo>((ref) {
   final box = Hive.box('invoices');
@@ -24,23 +22,30 @@ NotifierProvider<InvoiceListNotifier, List<Invoice>>(
 );
 
 class InvoiceListNotifier extends Notifier<List<Invoice>> {
-  late final InvoiceLocalRepo repo;
   StreamSubscription? _sub;
+
+  /// ✅ no late init issues
+  InvoiceLocalRepo get repo => ref.read(invoiceRepoProvider);
 
   @override
   List<Invoice> build() {
-    repo = ref.read(invoiceRepoProvider);
+    List<Invoice> readAll() => List<Invoice>.from(repo.getAll());
 
-    final initial = List<Invoice>.from(repo.getAll());
+    final initial = readAll();
 
     final box = Hive.box('invoices');
     _sub?.cancel();
     _sub = box.watch().listen((_) {
-      state = List<Invoice>.from(repo.getAll());
+      state = readAll();
     });
 
     ref.onDispose(() => _sub?.cancel());
     return initial;
+  }
+
+  /// Optional helper if UI needs manual refresh
+  void refresh() {
+    state = List<Invoice>.from(repo.getAll());
   }
 
   Invoice? getById(String id) {
@@ -51,6 +56,24 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
     }
   }
 
+  // ---------------- Invoice Number ----------------
+  // ✅ since BusinessEntity.invoiceCounter does NOT exist,
+  // we generate next invoice number from existing invoices count per business.
+  String _nextInvoiceNumber({
+    required String businessId,
+    required bool isManual,
+    required String customInvoiceNumber,
+  }) {
+    if (isManual) {
+      final v = customInvoiceNumber.trim();
+      return v.isEmpty ? 'INV-${DateTime.now().millisecondsSinceEpoch}' : v;
+    }
+
+    final countForBusiness = state.where((e) => e.draft.businessId == businessId).length;
+    final next = countForBusiness + 1;
+    return 'INV-${next.toString().padLeft(4, '0')}';
+  }
+
   // ================= ADD =================
   Future<void> addFromDraft(InvoiceDraft draft) async {
     final id = const Uuid().v4();
@@ -58,31 +81,25 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
     final business =
     ref.read(businessListProvider.notifier).getById(draft.businessId);
 
-    String invoiceNumber;
+    final isManual = business?.invoiceNumberMode == InvoiceNumberMode.manual;
 
-    if (business?.invoiceNumberMode == InvoiceNumberMode.manual) {
-      invoiceNumber = draft.customInvoiceNumber.trim();
-    } else {
-      final next = (business?.invoiceCounter ?? 0) + 1;
-      invoiceNumber = 'INV-${next.toString().padLeft(4, '0')}';
+    final invoiceNumber = _nextInvoiceNumber(
+      businessId: draft.businessId,
+      isManual: isManual,
+      customInvoiceNumber: draft.customInvoiceNumber,
+    );
 
-      if (business != null) {
-        await ref
-            .read(businessListProvider.notifier)
-            .updateBusiness(business.copyWith(invoiceCounter: next));
-      }
-    }
-
+    // ✅ use draft.status as source of truth
     final invoice = Invoice(
       id: id,
       createdAt: draft.invoiceDateTime,
       draft: draft,
       invoiceNumber: invoiceNumber,
-      status: draft.status, // ✅ NEW: use selected invoice type
+      status: draft.status, // pending = unpaid
     );
 
     await repo.save(invoice);
-    state = List.from(repo.getAll());
+    state = List<Invoice>.from(repo.getAll());
 
     await ref.read(activityLogProvider.notifier).addLog(
       ActivityLog.create(
@@ -91,12 +108,15 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
         entityId: invoice.id,
         title: 'Invoice created',
         message:
-        'New invoice "$invoiceNumber" created for "${draft.customerName.isEmpty ? 'Customer' : draft.customerName}".',
+        'Invoice ${invoice.invoiceNumber} created for ${invoice.draft.customerName.isEmpty ? 'Customer' : invoice.draft.customerName}.',
         meta: {
-          'invoiceNumber': invoiceNumber,
-          'total': invoice.total,
+          'invoiceNumber': invoice.invoiceNumber,
+          'customerName': invoice.draft.customerName,
+          'customerMobile': invoice.draft.customerMobile,
+          'grandTotal': invoice.draft.grandTotal,
           'status': invoice.status.name,
-          'customerName': draft.customerName,
+          'createdAt': invoice.createdAt.toIso8601String(),
+          'businessId': invoice.draft.businessId,
         },
       ),
     );
@@ -110,14 +130,15 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
     final old = getById(invoiceId);
     if (old == null) return;
 
+    // ✅ keep invoiceNumber, but update date/draft/status
     final updated = old.copyWith(
-      draft: draft,
       createdAt: draft.invoiceDateTime,
-      status: draft.status, // ✅ NEW: update status from UI
+      draft: draft,
+      status: draft.status,
     );
 
     await repo.save(updated);
-    state = List.from(repo.getAll());
+    state = List<Invoice>.from(repo.getAll());
 
     await ref.read(activityLogProvider.notifier).addLog(
       ActivityLog.create(
@@ -126,11 +147,15 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
         entityId: updated.id,
         title: 'Invoice updated',
         message:
-        'Invoice "${updated.invoiceNumber}" updated for "${draft.customerName.isEmpty ? 'Customer' : draft.customerName}".',
+        'Invoice ${updated.invoiceNumber} updated for ${updated.draft.customerName.isEmpty ? 'Customer' : updated.draft.customerName}.',
         meta: {
           'invoiceNumber': updated.invoiceNumber,
-          'total': updated.total,
+          'customerName': updated.draft.customerName,
+          'customerMobile': updated.draft.customerMobile,
+          'grandTotal': updated.draft.grandTotal,
           'status': updated.status.name,
+          'createdAt': updated.createdAt.toIso8601String(),
+          'businessId': updated.draft.businessId,
         },
       ),
     );
@@ -151,21 +176,30 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
         title: 'Invoice deleted',
         message: old == null
             ? 'Invoice deleted.'
-            : 'Invoice "${old.invoiceNumber}" deleted.',
+            : 'Invoice ${old.invoiceNumber} deleted.',
         meta: {
           'invoiceNumber': old?.invoiceNumber ?? '',
-          'total': old?.total ?? 0.0,
+          'customerName': old?.draft.customerName ?? '',
+          'customerMobile': old?.draft.customerMobile ?? '',
+          'grandTotal': old?.draft.grandTotal ?? 0,
+          'status': old?.status.name ?? '',
+          'createdAt': old?.createdAt.toIso8601String() ?? '',
+          'businessId': old?.draft.businessId ?? '',
         },
       ),
     );
   }
 
-  // ================= STATUS =================
+  // ================= STATUS TOGGLE =================
   Future<void> togglePaymentStatus(Invoice invoice) async {
+    final newStatus = invoice.status == PaymentStatus.paid
+        ? PaymentStatus.pending
+        : PaymentStatus.paid;
+
+    // ✅ update BOTH invoice.status and draft.status
     final updated = invoice.copyWith(
-      status: invoice.status == PaymentStatus.paid
-          ? PaymentStatus.pending
-          : PaymentStatus.paid,
+      status: newStatus,
+      draft: invoice.draft.copyWith(status: newStatus),
     );
 
     await repo.save(updated);
@@ -175,20 +209,25 @@ class InvoiceListNotifier extends Notifier<List<Invoice>> {
       ActivityLog.create(
         entity: LogEntity.invoice,
         action: LogAction.update,
-        entityId: invoice.id,
-        title: 'Payment status changed',
+        entityId: updated.id,
+        title: 'Invoice payment updated',
         message:
-        'Invoice "${updated.invoiceNumber}" marked as ${updated.status == PaymentStatus.paid ? 'PAID' : 'UNPAID'}.',
+        'Invoice ${updated.invoiceNumber} marked as ${updated.status.name.toUpperCase()}.',
         meta: {
           'invoiceNumber': updated.invoiceNumber,
           'status': updated.status.name,
+          'grandTotal': updated.draft.grandTotal,
+          'customerName': updated.draft.customerName,
         },
       ),
     );
   }
 
-  Future<void> refresh() async {
-    // force pull latest from Hive
+  // ================= IMPORT =================
+  Future<void> importMany(List<Invoice> invoices) async {
+    for (final inv in invoices) {
+      await repo.save(inv);
+    }
     state = List<Invoice>.from(repo.getAll());
   }
 }

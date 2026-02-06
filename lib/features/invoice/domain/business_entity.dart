@@ -1,18 +1,21 @@
-enum InvoiceNumberMode { auto, manual }
-
 class BusinessEntity {
   final String id;
   final String name;
-
   final String upiId;
   final String phone;
   final String address;
 
-  /// ✅ NEW: store business logo/image in base64 (works web + mobile)
-  final String logoBase64;
+  /// ✅ NEW (file path on device)
+  final String? imagePath;
+
+  /// ✅ BACKWARD COMPAT: old code expects this
+  /// (if you used base64 image earlier for PDF/logo)
+  final String? logoBase64;
 
   final InvoiceNumberMode invoiceNumberMode;
-  final int invoiceCounter;
+
+  final DateTime createdAt;
+  final DateTime updatedAt;
 
   const BusinessEntity({
     required this.id,
@@ -20,42 +23,56 @@ class BusinessEntity {
     required this.upiId,
     required this.phone,
     required this.address,
-    required this.logoBase64,
     required this.invoiceNumberMode,
-    required this.invoiceCounter,
+    required this.createdAt,
+    required this.updatedAt,
+    this.imagePath,
+    this.logoBase64,
   });
 
   factory BusinessEntity.create(String name) {
+    final now = DateTime.now();
     return BusinessEntity(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      id: now.microsecondsSinceEpoch.toString(),
       name: name.trim(),
       upiId: '',
       phone: '',
       address: '',
-      logoBase64: '',
       invoiceNumberMode: InvoiceNumberMode.auto,
-      invoiceCounter: 0,
+      createdAt: now,
+      updatedAt: now,
+      imagePath: null,
+      logoBase64: null,
     );
   }
 
   BusinessEntity copyWith({
+    String? id,
     String? name,
     String? upiId,
     String? phone,
     String? address,
-    String? logoBase64,
     InvoiceNumberMode? invoiceNumberMode,
-    int? invoiceCounter,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+
+    /// ✅ NEW
+    String? imagePath,
+
+    /// ✅ BACKWARD COMPAT
+    String? logoBase64,
   }) {
     return BusinessEntity(
-      id: id,
+      id: id ?? this.id,
       name: name ?? this.name,
       upiId: upiId ?? this.upiId,
       phone: phone ?? this.phone,
       address: address ?? this.address,
-      logoBase64: logoBase64 ?? this.logoBase64,
       invoiceNumberMode: invoiceNumberMode ?? this.invoiceNumberMode,
-      invoiceCounter: invoiceCounter ?? this.invoiceCounter,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      imagePath: imagePath ?? this.imagePath,
+      logoBase64: logoBase64 ?? this.logoBase64,
     );
   }
 
@@ -65,24 +82,50 @@ class BusinessEntity {
     'upiId': upiId,
     'phone': phone,
     'address': address,
-    'logoBase64': logoBase64,
     'invoiceNumberMode': invoiceNumberMode.name,
-    'invoiceCounter': invoiceCounter,
+    'createdAt': createdAt.toIso8601String(),
+    'updatedAt': updatedAt.toIso8601String(),
+
+    /// ✅ NEW
+    'imagePath': imagePath,
+
+    /// ✅ BACKWARD COMPAT
+    'logoBase64': logoBase64,
   };
 
-  factory BusinessEntity.fromJson(Map<dynamic, dynamic> json) {
+  factory BusinessEntity.fromJson(Map json) {
+    String? _cleanNullable(dynamic v) {
+      final s = (v as String?)?.trim();
+      if (s == null || s.isEmpty) return null;
+      return s;
+    }
+
     return BusinessEntity(
-      id: json['id'].toString(),
+      id: (json['id'] ?? '').toString(),
       name: (json['name'] ?? '').toString(),
       upiId: (json['upiId'] ?? '').toString(),
       phone: (json['phone'] ?? '').toString(),
       address: (json['address'] ?? '').toString(),
-      logoBase64: (json['logoBase64'] ?? '').toString(),
-      invoiceNumberMode: InvoiceNumberMode.values.firstWhere(
-            (e) => e.name == (json['invoiceNumberMode'] ?? 'auto'),
-        orElse: () => InvoiceNumberMode.auto,
-      ),
-      invoiceCounter: (json['invoiceCounter'] ?? 0) as int,
+      invoiceNumberMode:
+      _parseMode((json['invoiceNumberMode'] ?? '').toString()),
+      createdAt: DateTime.tryParse((json['createdAt'] ?? '').toString()) ??
+          DateTime.now(),
+      updatedAt: DateTime.tryParse((json['updatedAt'] ?? '').toString()) ??
+          DateTime.now(),
+
+      /// ✅ NEW (backward compatible)
+      imagePath: _cleanNullable(json['imagePath']),
+
+      /// ✅ BACKWARD COMPAT (so existing notifier/PDF keeps working)
+      logoBase64: _cleanNullable(json['logoBase64']),
     );
   }
+
+  static InvoiceNumberMode _parseMode(String raw) {
+    final v = raw.trim().toLowerCase();
+    if (v == 'manual') return InvoiceNumberMode.manual;
+    return InvoiceNumberMode.auto;
+  }
 }
+
+enum InvoiceNumberMode { auto, manual }

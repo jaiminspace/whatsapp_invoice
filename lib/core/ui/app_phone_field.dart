@@ -2,19 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 
 class AppPhoneField extends StatelessWidget {
-  final String initialText; // national number only
-  final String initialCountryCode; // "IN"
-  final ValueChanged<String> onChangedE164; // +9198xxxx
-  final ValueChanged<String>? onChangedNational; // 98xxxx
+  final String initialText;
+  final String initialCountryCode;
   final String label;
+
+  final ValueChanged<String> onChangedE164;
+  final ValueChanged<bool> onValidChanged;
 
   const AppPhoneField({
     super.key,
     required this.initialText,
     this.initialCountryCode = 'IN',
-    required this.onChangedE164,
-    this.onChangedNational,
     this.label = 'Mobile number',
+    required this.onChangedE164,
+    required this.onValidChanged,
   });
 
   @override
@@ -22,20 +23,26 @@ class AppPhoneField extends StatelessWidget {
     return IntlPhoneField(
       initialCountryCode: initialCountryCode,
       initialValue: initialText,
-      disableLengthCheck: false,
       decoration: InputDecoration(
         labelText: label,
         border: const OutlineInputBorder(),
         prefixIcon: const Icon(Icons.phone),
       ),
-      dropdownIconPosition: IconPosition.trailing,
+
+      // avoid hard crash while typing
+      disableLengthCheck: true,
+
       onChanged: (phone) {
-        // phone.completeNumber => +91XXXXXXXXXX
-        // phone.number => national part
         onChangedE164(phone.completeNumber);
-        onChangedNational?.call(phone.number);
+
+        bool valid = false;
+        try {
+          valid = phone.isValidNumber();
+        } catch (_) {
+          valid = false;
+        }
+        onValidChanged(valid);
       },
-      onCountryChanged: (_) {},
     );
   }
 }

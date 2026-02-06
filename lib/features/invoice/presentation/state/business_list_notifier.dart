@@ -39,7 +39,10 @@ class BusinessListNotifier extends Notifier<List<BusinessEntity>> {
           .whereType<Map>()
           .map((e) => BusinessEntity.fromJson(e))
           .toList();
-      list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+      list.sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
       return list;
     }
 
@@ -68,6 +71,9 @@ class BusinessListNotifier extends Notifier<List<BusinessEntity>> {
     final box = ref.read(businessBoxProvider);
     await box.put(b.id, b.toJson());
 
+    final hasLogo =
+        (b.logoBase64 ?? '').trim().isNotEmpty || (b.imagePath ?? '').trim().isNotEmpty;
+
     await ref.read(activityLogProvider.notifier).addLog(
       ActivityLog.create(
         entity: LogEntity.business,
@@ -79,7 +85,7 @@ class BusinessListNotifier extends Notifier<List<BusinessEntity>> {
           'name': b.name,
           'phone': b.phone,
           'upiId': b.upiId,
-          'hasLogo': b.logoBase64.trim().isNotEmpty,
+          'hasLogo': hasLogo,
         },
       ),
     );
@@ -90,6 +96,9 @@ class BusinessListNotifier extends Notifier<List<BusinessEntity>> {
   Future<void> updateBusiness(BusinessEntity b) async {
     final box = ref.read(businessBoxProvider);
     await box.put(b.id, b.toJson());
+
+    final hasLogo =
+        (b.logoBase64 ?? '').trim().isNotEmpty || (b.imagePath ?? '').trim().isNotEmpty;
 
     await ref.read(activityLogProvider.notifier).addLog(
       ActivityLog.create(
@@ -103,7 +112,7 @@ class BusinessListNotifier extends Notifier<List<BusinessEntity>> {
           'name': b.name,
           'phone': b.phone,
           'upiId': b.upiId,
-          'hasLogo': b.logoBase64.trim().isNotEmpty,
+          'hasLogo': hasLogo,
         },
       ),
     );

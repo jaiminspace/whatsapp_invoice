@@ -1,5 +1,4 @@
-import 'dart:convert';
-import 'dart:typed_data';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -51,7 +50,15 @@ class BusinessesPage extends ConsumerWidget {
     );
 
     if (ok == true) {
-      await ref.read(businessListProvider.notifier).delete(b.id);
+      // Prefer deleteBusiness if exists, fallback to delete
+      final notifier = ref.read(businessListProvider.notifier);
+      if (notifier is dynamic) {
+        try {
+          await (notifier as dynamic).deleteBusiness(b.id);
+        } catch (_) {
+          await (notifier as dynamic).delete(b.id);
+        }
+      }
     }
   }
 
@@ -86,8 +93,7 @@ class BusinessesPage extends ConsumerWidget {
               const SizedBox(height: 10),
               const Text(
                 'No businesses yet',
-                style:
-                TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 8),
               const Text(
@@ -116,8 +122,6 @@ class BusinessesPage extends ConsumerWidget {
               selectedId == b.id) ||
               ((selectedId == null || selectedId.trim().isEmpty) && i == 0);
 
-          final hasLogo = b.logoBase64.trim().isNotEmpty;
-
           return Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
@@ -139,17 +143,7 @@ class BusinessesPage extends ConsumerWidget {
                   ),
                 );
               },
-              leading: CircleAvatar(
-                backgroundImage: hasLogo
-                    ? MemoryImage(base64Decode(b.logoBase64))
-                    : null,
-                child: hasLogo
-                    ? null
-                    : Text(
-                  (b.name.trim().isEmpty ? 'B' : b.name.trim()[0])
-                      .toUpperCase(),
-                ),
-              ),
+              leading: _BizAvatar(name: b.name, imagePath: b.imagePath),
               title: Text(
                 b.name.trim().isEmpty ? 'Business' : b.name.trim(),
                 style: const TextStyle(fontWeight: FontWeight.w700),
@@ -194,7 +188,26 @@ class BusinessesPage extends ConsumerWidget {
   }
 }
 
-/// ✅ separate sheet with saving guard (prevents double add)
+class _BizAvatar extends StatelessWidget {
+  final String name;
+  final String? imagePath;
+
+  const _BizAvatar({required this.name, required this.imagePath});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasImage = (imagePath ?? '').trim().isNotEmpty && File(imagePath!).existsSync();
+    if (hasImage) {
+      return CircleAvatar(backgroundImage: FileImage(File(imagePath!)));
+    }
+
+    final t = name.trim();
+    final letter = t.isEmpty ? 'B' : t[0].toUpperCase();
+    return CircleAvatar(child: Text(letter));
+  }
+}
+
+/// ✅ separate sheet with validation gating (name + phone valid)
 class _BusinessFormSheet extends ConsumerStatefulWidget {
   final BusinessEntity? editing;
   const _BusinessFormSheet({this.editing});
@@ -206,101 +219,102 @@ class _BusinessFormSheet extends ConsumerStatefulWidget {
 class _BusinessFormSheetState extends ConsumerState<_BusinessFormSheet> {
   late final TextEditingController nameCtrl;
   late final TextEditingController upiCtrl;
-  late final TextEditingController phoneCtrl;
   late final TextEditingController addressCtrl;
 
   late InvoiceNumberMode mode;
 
-  String _logoBase64 = '';
+  String _phoneE164 = '';
+  bool _phoneValid = false;
+
+  String? _imagePath;
+
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
     final e = widget.editing;
+
     nameCtrl = TextEditingController(text: e?.name ?? '');
     upiCtrl = TextEditingController(text: e?.upiId ?? '');
-    phoneCtrl = TextEditingController(text: e?.phone ?? '');
     addressCtrl = TextEditingController(text: e?.address ?? '');
+
     mode = e?.invoiceNumberMode ?? InvoiceNumberMode.auto;
-    _logoBase64 = e?.logoBase64 ?? '';
+
+    _phoneE164 = e?.phone ?? '';
+    _phoneValid = false; // require re-validate in field
+    _imagePath = e?.imagePath;
   }
 
   @override
   void dispose() {
     nameCtrl.dispose();
     upiCtrl.dispose();
-    phoneCtrl.dispose();
     addressCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _pickLogo() async {
+  bool get _canSave {
+    final nameOk = nameCtrl.text.trim().isNotEmpty;
+    return nameOk && _phoneValid;
+  }
+
+  Future<void> _pickImage() async {
     final picker = ImagePicker();
-    final x = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 75,
-      maxWidth: 700,
-    );
-    if (x == null) return;
-
-    final bytes = await x.readAsBytes();
-    if (!mounted) return;
-
-    setState(() {
-      _logoBase64 = base64Encode(bytes);
-    });
-  }
-
-  void _removeLogo() {
-    setState(() => _logoBase64 = '');
-  }
-
-  Uint8List? _logoBytesOrNull() {
-    try {
-      if (_logoBase64.trim().isEmpty) return null;
-      return base64Decode(_logoBase64);
-    } catch (_) {
-      return null;
-    }
+    final file = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
+    if (file == null) return;
+    setState(() => _imagePath = file.path);
   }
 
   Future<void> _save() async {
     if (_saving) return;
-    setState(() => _saving = true);
 
     final name = nameCtrl.text.trim();
     if (name.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Business name is required')),
-        );
-      }
-      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Business name is required')),
+      );
       return;
     }
+
+    if (!_phoneValid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid business phone number')),
+      );
+      return;
+    }
+
+    setState(() => _saving = true);
 
     if (widget.editing == null) {
       final newBusiness = BusinessEntity.create(name).copyWith(
         upiId: upiCtrl.text.trim(),
-        phone: phoneCtrl.text.trim(),
+        phone: _phoneE164,
         address: addressCtrl.text.trim(),
         invoiceNumberMode: mode,
-        logoBase64: _logoBase64,
+        imagePath: (_imagePath ?? '').trim().isEmpty ? null : _imagePath!.trim(),
       );
 
-      await ref.read(businessListProvider.notifier).add(newBusiness);
+      final notifier = ref.read(businessListProvider.notifier);
+      // Prefer addBusiness, fallback add
+      try {
+        await (notifier as dynamic).addBusiness(newBusiness);
+      } catch (_) {
+        await (notifier as dynamic).add(newBusiness);
+      }
     } else {
       final updated = widget.editing!.copyWith(
         name: name,
         upiId: upiCtrl.text.trim(),
-        phone: phoneCtrl.text.trim(),
+        phone: _phoneE164,
         address: addressCtrl.text.trim(),
         invoiceNumberMode: mode,
-        logoBase64: _logoBase64,
+        imagePath: (_imagePath ?? '').trim().isEmpty ? null : _imagePath!.trim(),
       );
 
-      await ref.read(businessListProvider.notifier).update(updated);
+      final notifier = ref.read(businessListProvider.notifier);
+      // update alias exists in your notifier already
+      await (notifier as dynamic).update(updated);
     }
 
     if (mounted) Navigator.pop(context);
@@ -309,7 +323,6 @@ class _BusinessFormSheetState extends ConsumerState<_BusinessFormSheet> {
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.editing != null;
-    final logoBytes = _logoBytesOrNull();
 
     return SafeArea(
       child: Padding(
@@ -319,139 +332,168 @@ class _BusinessFormSheetState extends ConsumerState<_BusinessFormSheet> {
           top: 12,
           bottom: MediaQuery.of(context).viewInsets.bottom + 16,
         ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                isEdit ? 'Edit Business' : 'Add Business',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              isEdit ? 'Edit Business' : 'Add Business',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 12),
 
-              // ✅ Logo picker
-              Row(
-                children: [
-                  CircleAvatar(
-                    radius: 28,
-                    backgroundImage: logoBytes != null ? MemoryImage(logoBytes) : null,
-                    child: logoBytes == null
-                        ? const Icon(Icons.storefront_outlined)
-                        : null,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Business logo (optional)',
-                          style: TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        const SizedBox(height: 6),
-                        Wrap(
-                          spacing: 10,
-                          children: [
-                            OutlinedButton.icon(
-                              onPressed: _saving ? null : _pickLogo,
-                              icon: const Icon(Icons.image_outlined),
-                              label: const Text('Choose'),
-                            ),
-                            if (_logoBase64.trim().isNotEmpty)
-                              TextButton.icon(
-                                onPressed: _saving ? null : _removeLogo,
-                                icon: const Icon(Icons.delete_outline),
-                                label: const Text('Remove'),
-                              ),
-                          ],
-                        ),
-                      ],
+            Row(
+              children: [
+                _BizImagePicker(
+                  imagePath: _imagePath,
+                  name: nameCtrl.text.trim().isEmpty ? 'B' : nameCtrl.text.trim(),
+                  onTap: _pickImage,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Business name *',
+                      border: OutlineInputBorder(),
                     ),
+                    onChanged: (_) => setState(() {}),
                   ),
-                ],
-              ),
-
-              const SizedBox(height: 12),
-
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Business name *',
-                  border: OutlineInputBorder(),
                 ),
-              ),
-              const SizedBox(height: 10),
+              ],
+            ),
 
-              TextField(
-                controller: upiCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'UPI ID (optional)',
-                  border: OutlineInputBorder(),
-                  hintText: 'e.g. jaimin@upi',
+            const SizedBox(height: 10),
+
+            TextField(
+              controller: upiCtrl,
+              decoration: const InputDecoration(
+                labelText: 'UPI ID (optional)',
+                border: OutlineInputBorder(),
+                hintText: 'e.g. jaimin@upi',
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            AppPhoneField(
+              initialText: _phoneE164,
+              label: 'Business phone *',
+              onChangedE164: (v) => _phoneE164 = v,
+              onValidChanged: (ok) => setState(() => _phoneValid = ok),
+            ),
+
+            if (!_phoneValid) ...[
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Enter a valid phone number',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
-
-              // ✅ keep your phone field setup
-              AppPhoneField(
-                initialText: phoneCtrl.text.replaceAll('+', ''),
-                label: 'Business phone (optional)',
-                onChangedE164: (v) => phoneCtrl.text = v, // stores +91...
-              ),
-              const SizedBox(height: 10),
-
-              TextField(
-                controller: addressCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Address (optional)',
-                  border: OutlineInputBorder(),
-                ),
-                maxLines: 2,
-              ),
-              const SizedBox(height: 10),
-
-              DropdownButtonFormField<InvoiceNumberMode>(
-                value: mode,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'Invoice numbering',
-                  border: OutlineInputBorder(),
-                ),
-                items: const [
-                  DropdownMenuItem(
-                    value: InvoiceNumberMode.auto,
-                    child: Text('Auto (INV-0001)', overflow: TextOverflow.ellipsis),
-                  ),
-                  DropdownMenuItem(
-                    value: InvoiceNumberMode.manual,
-                    child: Text('Manual', overflow: TextOverflow.ellipsis),
-                  ),
-                ],
-                onChanged: _saving ? null : (v) => setState(() => mode = v ?? mode),
-              ),
-
-              const SizedBox(height: 14),
-
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: _saving ? null : () => Navigator.pop(context),
-                      child: const Text('Cancel'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton(
-                      onPressed: _saving ? null : _save,
-                      child: Text(_saving ? 'Saving...' : (isEdit ? 'Update' : 'Save')),
-                    ),
-                  ),
-                ],
               ),
             ],
-          ),
+
+            const SizedBox(height: 10),
+
+            TextField(
+              controller: addressCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Address (optional)',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 2,
+            ),
+            const SizedBox(height: 10),
+
+            DropdownButtonFormField<InvoiceNumberMode>(
+              value: mode,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Invoice numbering',
+                border: OutlineInputBorder(),
+              ),
+              items: const [
+                DropdownMenuItem(
+                  value: InvoiceNumberMode.auto,
+                  child: Text('Auto (INV-0001)', overflow: TextOverflow.ellipsis),
+                ),
+                DropdownMenuItem(
+                  value: InvoiceNumberMode.manual,
+                  child: Text('Manual', overflow: TextOverflow.ellipsis),
+                ),
+              ],
+              onChanged: _saving ? null : (v) => setState(() => mode = v ?? mode),
+            ),
+
+            const SizedBox(height: 14),
+
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _saving ? null : () => Navigator.pop(context),
+                    child: const Text('Cancel'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: (_saving || !_canSave) ? null : _save,
+                    child: Text(_saving ? 'Saving...' : (isEdit ? 'Update' : 'Save')),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
+      ),
+    );
+  }
+}
+
+class _BizImagePicker extends StatelessWidget {
+  final String? imagePath;
+  final String name;
+  final VoidCallback onTap;
+
+  const _BizImagePicker({
+    required this.imagePath,
+    required this.name,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hasImage = (imagePath ?? '').trim().isNotEmpty && File(imagePath!).existsSync();
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(44),
+      onTap: onTap,
+      child: Stack(
+        children: [
+          CircleAvatar(
+            radius: 28,
+            backgroundImage: hasImage ? FileImage(File(imagePath!)) : null,
+            child: hasImage
+                ? null
+                : Text(
+              name.trim().isEmpty ? 'B' : name.trim()[0].toUpperCase(),
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: CircleAvatar(
+              radius: 11,
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              child: const Icon(Icons.camera_alt, size: 14, color: Colors.white),
+            ),
+          ),
+        ],
       ),
     );
   }

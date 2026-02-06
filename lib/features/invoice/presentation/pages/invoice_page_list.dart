@@ -55,8 +55,7 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
         context,
         MaterialPageRoute(builder: (_) => const CreateInvoicePage()),
       );
-      // ✅ FORCE refresh every time returning
-      await ref.read(invoiceListProvider.notifier).refresh();
+
     }
 
     // ✅ IMPORTANT: force refresh so newly added/edited invoice shows immediately
