@@ -23,6 +23,9 @@ class CustomersPage extends ConsumerStatefulWidget {
 class _CustomersPageState extends ConsumerState<CustomersPage> {
   final _searchCtrl = TextEditingController();
 
+  // ✅ Prevent sheet on top of sheet
+  bool _sheetOpen = false;
+
   @override
   void dispose() {
     _searchCtrl.dispose();
@@ -59,12 +62,18 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
   }
 
   Future<void> _openAddOrEdit({Customer? editing}) async {
+    if (_sheetOpen) return;
+    _sheetOpen = true;
+
     await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (_) => _CustomerFormSheet(editing: editing),
     );
+
+    if (!mounted) return;
+    _sheetOpen = false;
   }
 
   @override
@@ -107,14 +116,42 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
               decoration: InputDecoration(
                 hintText: 'Search customer / mobile / address',
                 prefixIcon: const Icon(Icons.search),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
               onChanged: (_) => setState(() {}),
             ),
           ),
           Expanded(
             child: customers.isEmpty
-                ? const Center(child: Text('No customers yet'))
+                ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.people_alt_outlined, size: 44),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'No customer/client yet',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Add your customers/clients to start creating invoices for them.',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 14),
+                    FilledButton.icon(
+                      onPressed: () => _openAddOrEdit(),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add Customer/Client'),
+                    ),
+                  ],
+                ),
+              ),
+            )
                 : ListView.separated(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
               itemCount: customers.length,
@@ -123,7 +160,6 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
                 final c = customers[i];
                 final name = c.name.trim().isEmpty ? 'Customer' : c.name.trim();
                 final sale = (totalSalesMap[c.id] ?? 0.0);
-
                 final joined = DateFormat('dd MMM yyyy').format(c.createdAt);
 
                 return Container(
@@ -138,13 +174,8 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
                     padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
                     child: Row(
                       children: [
-                        _AvatarImage(
-                          radius: 20,
-                          name: name,
-                          imagePath: c.imagePath,
-                        ),
+                        _AvatarImage(radius: 20, name: name, imagePath: c.imagePath),
                         const SizedBox(width: 12),
-
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -153,10 +184,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
                                 name,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 15,
-                                ),
+                                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
                               ),
                               const SizedBox(height: 4),
                               Text(
@@ -173,30 +201,19 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
                                 ),
                               ],
                               const SizedBox(height: 2),
-                              Text(
-                                'Joined: $joined',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
+                              Text('Joined: $joined', style: Theme.of(context).textTheme.bodySmall),
                             ],
                           ),
                         ),
-
                         const SizedBox(width: 10),
-
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            Text(
-                              'Total Sale',
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
+                            Text('Total Sale', style: Theme.of(context).textTheme.bodySmall),
                             const SizedBox(height: 2),
                             Text(
                               '₹${sale.toStringAsFixed(0)}',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w900,
-                                fontSize: 16,
-                              ),
+                              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
                             ),
                             const SizedBox(height: 8),
                             Row(
@@ -254,195 +271,206 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
   }
 }
 
+// ---------------- BOTTOM SHEET ----------------
+
 class _CustomerFormSheet extends ConsumerStatefulWidget {
   final Customer? editing;
-  const _CustomerFormSheet({this.editing});
+  const _CustomerFormSheet({required this.editing});
 
   @override
   ConsumerState<_CustomerFormSheet> createState() => _CustomerFormSheetState();
 }
 
 class _CustomerFormSheetState extends ConsumerState<_CustomerFormSheet> {
-  late final TextEditingController nameCtrl;
-  late final TextEditingController addressCtrl;
+  final _formKey = GlobalKey<FormState>();
+  final _picker = ImagePicker();
+
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _addressCtrl;
 
   String _mobileE164 = '';
-  bool _mobileValid = false;
-  String? _imagePath;
+  bool _isPhoneValid = false;
 
-  bool _saving = false;
+  bool _phoneTouched = false;
+  bool _submitted = false;
+
+  // ✅ keep / update image safely
+  String? _imagePath;
+  bool _imageTouched = false; // ✅ only change image if user touches
 
   @override
   void initState() {
     super.initState();
-    final c = widget.editing;
-    nameCtrl = TextEditingController(text: c?.name ?? '');
-    addressCtrl = TextEditingController(text: c?.address ?? '');
-    _mobileE164 = c?.mobile ?? '';
-    _imagePath = c?.imagePath;
+    _nameCtrl = TextEditingController(text: widget.editing?.name ?? '');
+    _addressCtrl = TextEditingController(text: widget.editing?.address ?? '');
 
-    // If old mobile exists, allow saving only after field validates again.
-    _mobileValid = false;
+    _mobileE164 = widget.editing?.mobile ?? '';
+    _imagePath = widget.editing?.imagePath;
+
+    _isPhoneValid = _mobileE164.trim().isNotEmpty; // assume valid for existing
   }
 
   @override
   void dispose() {
-    nameCtrl.dispose();
-    addressCtrl.dispose();
+    _nameCtrl.dispose();
+    _addressCtrl.dispose();
     super.dispose();
   }
 
+  Future<void> _pickAvatar() async {
+    final x = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    if (x == null) return;
+    setState(() {
+      _imageTouched = true;
+      _imagePath = x.path;
+    });
+  }
+
+  void _removeAvatar() {
+    setState(() {
+      _imageTouched = true;
+      _imagePath = ''; // explicit clear
+    });
+  }
+
   bool get _canSave {
-    final nameOk = nameCtrl.text.trim().isNotEmpty;
-    return nameOk && _mobileValid;
+    final nameOk = _nameCtrl.text.trim().isNotEmpty;
+    final phoneEntered = _mobileE164.trim().isNotEmpty;
+    return nameOk && phoneEntered && _isPhoneValid;
   }
 
-  Future<void> _pickImage() async {
-    final picker = ImagePicker();
-    final file = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
-    if (file == null) return;
-    setState(() => _imagePath = file.path);
-  }
+  Future<void> _saveCustomer() async {
+    setState(() => _submitted = true);
 
-  Future<void> _save() async {
-    if (_saving) return;
+    final ok = _formKey.currentState?.validate() ?? true;
+    if (!ok) return;
 
-    final name = nameCtrl.text.trim();
-    if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Customer name is required')),
-      );
-      return;
-    }
+    final name = _nameCtrl.text.trim();
+    final address = _addressCtrl.text.trim().isEmpty ? null : _addressCtrl.text.trim();
+    final mobile = _mobileE164.trim();
 
-    if (!_mobileValid) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid mobile number')),
-      );
-      return;
-    }
+    if (mobile.isEmpty || !_isPhoneValid) return;
 
-    setState(() => _saving = true);
+    // ✅ Key rule:
+    // If user did NOT touch image -> pass null so notifier keeps old image
+    final imageForSave = _imageTouched ? _imagePath : null;
 
-    final address = addressCtrl.text.trim();
+    await ref.read(customerListProvider.notifier).upsertCustomer(
+      editing: widget.editing,
+      name: name,
+      mobile: mobile,
+      address: address,
+      imagePath: imageForSave,
+    );
 
-    if (widget.editing == null) {
-      await ref.read(customerListProvider.notifier).addCustomer(
-        name: name,
-        mobile: _mobileE164,
-        address: address,
-        imagePath: _imagePath,
-      );
-    } else {
-      await ref.read(customerListProvider.notifier).updateCustomer(
-        id: widget.editing!.id,
-        name: name,
-        mobile: _mobileE164,
-        address: address,
-        imagePath: _imagePath,
-      );
-    }
+    if (!mounted) return;
+    Navigator.pop(context, true);
 
-    if (mounted) Navigator.pop(context, true);
+    // Snack AFTER pop (safer)
+    AppSnack.show(context, widget.editing == null ? 'Customer added' : 'Customer updated');
   }
 
   @override
   Widget build(BuildContext context) {
-    final isEdit = widget.editing != null;
-    final joined = isEdit ? DateFormat('dd MMM yyyy').format(widget.editing!.createdAt) : null;
+    final showPhoneError = _phoneTouched || _submitted;
 
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.only(
-          left: 16,
-          right: 16,
-          top: 12,
-          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-        ),
+    final displayName = _nameCtrl.text.trim().isEmpty ? 'Customer' : _nameCtrl.text.trim();
+
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 8,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+      ),
+      child: Form(
+        key: _formKey,
+        autovalidateMode: AutovalidateMode.disabled,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              isEdit ? 'Edit Customer' : 'Add Customer',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              widget.editing == null ? 'Add Customer' : 'Edit Customer',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
             ),
-            if (joined != null) ...[
-              const SizedBox(height: 6),
-              Text('Joined: $joined', style: Theme.of(context).textTheme.bodySmall),
-            ],
             const SizedBox(height: 12),
 
-            Row(
-              children: [
-                _AvatarPicker(
-                  imagePath: _imagePath,
-                  name: nameCtrl.text.trim().isEmpty ? 'C' : nameCtrl.text.trim(),
-                  onTap: _pickImage,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: nameCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Customer name *',
-                      border: OutlineInputBorder(),
-                    ),
-                    onChanged: (_) => setState(() {}),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Row(
+                children: [
+                  _AvatarPicker(
+                    imagePath: _imagePath,
+                    name: displayName,
+                    onTap: _pickAvatar,
                   ),
-                ),
-              ],
+                  const SizedBox(width: 12),
+                  if ((_imagePath ?? '').trim().isNotEmpty)
+                    TextButton.icon(
+                      onPressed: _removeAvatar,
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Remove'),
+                    ),
+                ],
+              ),
             ),
+            const SizedBox(height: 12),
 
+            TextFormField(
+              controller: _nameCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Customer name *',
+                border: OutlineInputBorder(),
+              ),
+              validator: (v) {
+                if (!_submitted) return null;
+                return (v ?? '').trim().isEmpty ? 'Name is required' : null;
+              },
+              onChanged: (_) => setState(() {}),
+            ),
             const SizedBox(height: 10),
 
             AppPhoneField(
               initialText: _mobileE164,
+              initialCountryCode: 'IN',
               label: 'Mobile number *',
-              onChangedE164: (v) => _mobileE164 = v,
-              onValidChanged: (ok) => setState(() => _mobileValid = ok),
+              showError: showPhoneError,
+              required: true,
+              onChangedE164: (e164) {
+                _phoneTouched = true;
+                _mobileE164 = e164;
+                setState(() {});
+              },
+              onValidChanged: (valid) {
+                _phoneTouched = true;
+                _isPhoneValid = valid;
+                setState(() {});
+              },
             ),
 
-            if (!_mobileValid) ...[
-              const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Enter a valid mobile number',
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.error,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-
             const SizedBox(height: 10),
-
-            TextField(
-              controller: addressCtrl,
+            TextFormField(
+              controller: _addressCtrl,
               decoration: const InputDecoration(
                 labelText: 'Address (optional)',
                 border: OutlineInputBorder(),
               ),
-              maxLines: 2,
             ),
 
-            const SizedBox(height: 14),
-
+            const SizedBox(height: 16),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: _saving ? null : () => Navigator.pop(context, false),
+                    onPressed: () => Navigator.pop(context, false),
                     child: const Text('Cancel'),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: FilledButton(
-                    onPressed: (_saving || !_canSave) ? null : _save,
-                    child: Text(_saving ? 'Saving...' : (isEdit ? 'Update' : 'Save')),
+                    onPressed: _canSave ? _saveCustomer : null,
+                    child: Text(widget.editing == null ? 'Save' : 'Update'),
                   ),
                 ),
               ],
@@ -453,6 +481,8 @@ class _CustomerFormSheetState extends ConsumerState<_CustomerFormSheet> {
     );
   }
 }
+
+// ---------------- AVATAR WIDGETS ----------------
 
 class _AvatarPicker extends StatelessWidget {
   final String? imagePath;
@@ -501,12 +531,13 @@ class _AvatarImage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasImage = (imagePath ?? '').trim().isNotEmpty && File(imagePath!).existsSync();
+    final p = (imagePath ?? '').trim();
+    final hasImage = p.isNotEmpty && p != '' && File(p).existsSync();
 
     if (hasImage) {
       return CircleAvatar(
         radius: radius,
-        backgroundImage: FileImage(File(imagePath!)),
+        backgroundImage: FileImage(File(p)),
       );
     }
 

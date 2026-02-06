@@ -44,6 +44,67 @@ class CustomerListNotifier extends Notifier<List<Customer>> {
     }
   }
 
+  /// Unified add/update used by CustomersPage bottomsheet.
+  ///
+  /// imagePath rule:
+  /// - null  => KEEP old image (edit case)
+  /// - ''    => CLEAR image
+  /// - non-empty => SET image
+  Future<void> upsertCustomer({
+    Customer? editing,
+    required String name,
+    required String mobile,
+    String? address,
+    String? imagePath,
+  }) async {
+    final now = DateTime.now();
+    final trimmedName = name.trim();
+    final m = mobile.trim();
+
+    final old = editing;
+    final oldId = old?.id;
+
+    final newId = m.isNotEmpty
+        ? m
+        : (oldId ?? DateTime.now().microsecondsSinceEpoch.toString());
+
+    // If editing and id changes, delete old key
+    if (old != null && oldId != null && newId != oldId) {
+      await repo.delete(oldId);
+    }
+
+    final resolvedAddress =
+    (address ?? '').trim().isEmpty ? null : address!.trim();
+
+    String? resolvedImagePath;
+    if (old == null) {
+      // add
+      resolvedImagePath =
+      (imagePath ?? '').trim().isEmpty ? null : imagePath!.trim();
+    } else {
+      // edit
+      if (imagePath == null) {
+        resolvedImagePath = old.imagePath; // keep
+      } else {
+        final t = imagePath.trim();
+        resolvedImagePath = t.isEmpty ? null : t; // '' clears, non-empty sets
+      }
+    }
+
+    final customer = Customer(
+      id: newId,
+      name: trimmedName,
+      mobile: m,
+      address: resolvedAddress,
+      imagePath: resolvedImagePath,
+      createdAt: old?.createdAt ?? now,
+      updatedAt: now,
+    );
+
+    await repo.upsert(customer);
+    state = List<Customer>.from(repo.getAll());
+  }
+
   /// Used from invoice save flow (id = mobile)
   Future<void> upsertFromInvoice({
     required String name,
@@ -68,65 +129,40 @@ class CustomerListNotifier extends Notifier<List<Customer>> {
     state = List<Customer>.from(repo.getAll());
   }
 
+  // Optional: keep existing APIs (if used elsewhere)
+
   Future<void> addCustomer({
     required String name,
     required String mobile,
-    required String address,
+    String? address,
     String? imagePath,
   }) async {
-    final m = mobile.trim();
-    final id = m.isNotEmpty
-        ? m
-        : DateTime.now().microsecondsSinceEpoch.toString();
-
-    final now = DateTime.now();
-
-    final customer = Customer(
-      id: id,
-      name: name.trim(),
-      mobile: m,
-      address: address.trim().isEmpty ? null : address.trim(),
-      imagePath: (imagePath ?? '').trim().isEmpty ? null : imagePath!.trim(),
-      createdAt: now,
-      updatedAt: now,
+    await upsertCustomer(
+      editing: null,
+      name: name,
+      mobile: mobile,
+      address: address,
+      imagePath: imagePath,
     );
-
-    await repo.upsert(customer);
-    state = List<Customer>.from(repo.getAll());
   }
 
   Future<void> updateCustomer({
     required String id,
     required String name,
     required String mobile,
-    required String address,
+    String? address,
     String? imagePath,
   }) async {
     final old = getById(id);
     if (old == null) return;
 
-    final m = mobile.trim();
-    final newId = m.isNotEmpty ? m : old.id;
-
-    // if id changes (mobile changed), delete old key first
-    if (newId != old.id) {
-      await repo.delete(old.id);
-    }
-
-    final updated = Customer(
-      id: newId,
-      name: name.trim(),
-      mobile: m,
-      address: address.trim().isEmpty ? null : address.trim(),
-      imagePath: (imagePath ?? old.imagePath ?? '').trim().isEmpty
-          ? null
-          : (imagePath ?? old.imagePath)!.trim(),
-      createdAt: old.createdAt,
-      updatedAt: DateTime.now(),
+    await upsertCustomer(
+      editing: old,
+      name: name,
+      mobile: mobile,
+      address: address,
+      imagePath: imagePath,
     );
-
-    await repo.upsert(updated);
-    state = List<Customer>.from(repo.getAll());
   }
 
   Future<void> deleteCustomer(String id) async {
