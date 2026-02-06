@@ -39,7 +39,6 @@ class BusinessListNotifier extends Notifier<List<BusinessEntity>> {
           .whereType<Map>()
           .map((e) => BusinessEntity.fromJson(e))
           .toList();
-
       list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
       return list;
     }
@@ -63,12 +62,10 @@ class BusinessListNotifier extends Notifier<List<BusinessEntity>> {
     }
   }
 
+  // ---------------- CRUD ----------------
+
   Future<void> addBusiness(BusinessEntity b) async {
     final box = ref.read(businessBoxProvider);
-
-    // ✅ extra safety: don’t overwrite, don’t double-add same id
-    if (box.containsKey(b.id)) return;
-
     await box.put(b.id, b.toJson());
 
     await ref.read(activityLogProvider.notifier).addLog(
@@ -78,9 +75,16 @@ class BusinessListNotifier extends Notifier<List<BusinessEntity>> {
         entityId: b.id,
         title: 'Business created',
         message: 'Business "${b.name.isEmpty ? 'Business' : b.name}" added.',
-        meta: {'name': b.name, 'upiId': b.upiId, 'phone': b.phone},
+        meta: {
+          'name': b.name,
+          'phone': b.phone,
+          'upiId': b.upiId,
+          'hasLogo': b.logoBase64.trim().isNotEmpty,
+        },
       ),
     );
+
+    // ✅ don’t manually mutate state; Hive watch will refresh state
   }
 
   Future<void> updateBusiness(BusinessEntity b) async {
@@ -95,7 +99,12 @@ class BusinessListNotifier extends Notifier<List<BusinessEntity>> {
         title: 'Business updated',
         message:
         'Business "${b.name.isEmpty ? 'Business' : b.name}" updated.',
-        meta: {'name': b.name, 'upiId': b.upiId, 'phone': b.phone},
+        meta: {
+          'name': b.name,
+          'phone': b.phone,
+          'upiId': b.upiId,
+          'hasLogo': b.logoBase64.trim().isNotEmpty,
+        },
       ),
     );
   }
@@ -120,7 +129,7 @@ class BusinessListNotifier extends Notifier<List<BusinessEntity>> {
     );
   }
 
-  // ✅ aliases so your UI can call add/update/delete
+  // ✅ Aliases (so your UI can call add/update/delete)
   Future<void> add(BusinessEntity b) => addBusiness(b);
   Future<void> update(BusinessEntity b) => updateBusiness(b);
   Future<void> delete(String id) => deleteBusiness(id);

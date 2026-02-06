@@ -1,5 +1,9 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/ui/app_phone_field.dart';
 import '../../domain/business_entity.dart';
@@ -110,8 +114,9 @@ class BusinessesPage extends ConsumerWidget {
           final isSelected = (selectedId != null &&
               selectedId.trim().isNotEmpty &&
               selectedId == b.id) ||
-              ((selectedId == null || selectedId.trim().isEmpty) &&
-                  i == 0);
+              ((selectedId == null || selectedId.trim().isEmpty) && i == 0);
+
+          final hasLogo = b.logoBase64.trim().isNotEmpty;
 
           return Container(
             decoration: BoxDecoration(
@@ -135,7 +140,12 @@ class BusinessesPage extends ConsumerWidget {
                 );
               },
               leading: CircleAvatar(
-                child: Text(
+                backgroundImage: hasLogo
+                    ? MemoryImage(base64Decode(b.logoBase64))
+                    : null,
+                child: hasLogo
+                    ? null
+                    : Text(
                   (b.name.trim().isEmpty ? 'B' : b.name.trim()[0])
                       .toUpperCase(),
                 ),
@@ -164,11 +174,7 @@ class BusinessesPage extends ConsumerWidget {
                   PopupMenuButton<String>(
                     onSelected: (v) async {
                       if (v == 'edit') {
-                        await _openBusinessSheet(
-                          context,
-                          ref,
-                          editing: b,
-                        );
+                        await _openBusinessSheet(context, ref, editing: b);
                       } else if (v == 'delete') {
                         await _confirmDelete(context, ref, b);
                       }
@@ -204,6 +210,8 @@ class _BusinessFormSheetState extends ConsumerState<_BusinessFormSheet> {
   late final TextEditingController addressCtrl;
 
   late InvoiceNumberMode mode;
+
+  String _logoBase64 = '';
   bool _saving = false;
 
   @override
@@ -215,6 +223,7 @@ class _BusinessFormSheetState extends ConsumerState<_BusinessFormSheet> {
     phoneCtrl = TextEditingController(text: e?.phone ?? '');
     addressCtrl = TextEditingController(text: e?.address ?? '');
     mode = e?.invoiceNumberMode ?? InvoiceNumberMode.auto;
+    _logoBase64 = e?.logoBase64 ?? '';
   }
 
   @override
@@ -224,6 +233,36 @@ class _BusinessFormSheetState extends ConsumerState<_BusinessFormSheet> {
     phoneCtrl.dispose();
     addressCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickLogo() async {
+    final picker = ImagePicker();
+    final x = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 75,
+      maxWidth: 700,
+    );
+    if (x == null) return;
+
+    final bytes = await x.readAsBytes();
+    if (!mounted) return;
+
+    setState(() {
+      _logoBase64 = base64Encode(bytes);
+    });
+  }
+
+  void _removeLogo() {
+    setState(() => _logoBase64 = '');
+  }
+
+  Uint8List? _logoBytesOrNull() {
+    try {
+      if (_logoBase64.trim().isEmpty) return null;
+      return base64Decode(_logoBase64);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _save() async {
@@ -247,6 +286,7 @@ class _BusinessFormSheetState extends ConsumerState<_BusinessFormSheet> {
         phone: phoneCtrl.text.trim(),
         address: addressCtrl.text.trim(),
         invoiceNumberMode: mode,
+        logoBase64: _logoBase64,
       );
 
       await ref.read(businessListProvider.notifier).add(newBusiness);
@@ -257,6 +297,7 @@ class _BusinessFormSheetState extends ConsumerState<_BusinessFormSheet> {
         phone: phoneCtrl.text.trim(),
         address: addressCtrl.text.trim(),
         invoiceNumberMode: mode,
+        logoBase64: _logoBase64,
       );
 
       await ref.read(businessListProvider.notifier).update(updated);
@@ -268,6 +309,7 @@ class _BusinessFormSheetState extends ConsumerState<_BusinessFormSheet> {
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.editing != null;
+    final logoBytes = _logoBytesOrNull();
 
     return SafeArea(
       child: Padding(
@@ -277,91 +319,138 @@ class _BusinessFormSheetState extends ConsumerState<_BusinessFormSheet> {
           top: 12,
           bottom: MediaQuery.of(context).viewInsets.bottom + 16,
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              isEdit ? 'Edit Business' : 'Add Business',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 12),
-
-            TextField(
-              controller: nameCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Business name *',
-                border: OutlineInputBorder(),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                isEdit ? 'Edit Business' : 'Add Business',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
               ),
-            ),
-            const SizedBox(height: 10),
+              const SizedBox(height: 12),
 
-            TextField(
-              controller: upiCtrl,
-              decoration: const InputDecoration(
-                labelText: 'UPI ID (optional)',
-                border: OutlineInputBorder(),
-                hintText: 'e.g. jaimin@upi',
-              ),
-            ),
-            const SizedBox(height: 10),
-
-            AppPhoneField(
-              initialText: phoneCtrl.text.replaceAll('+', ''),
-              label: 'Business phone (optional)',
-              onChangedE164: (v) => phoneCtrl.text = v, // stores +91...
-            ),
-            const SizedBox(height: 10),
-
-            TextField(
-              controller: addressCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Address (optional)',
-                border: OutlineInputBorder(),
-              ),
-              maxLines: 2,
-            ),
-            const SizedBox(height: 10),
-
-            DropdownButtonFormField<InvoiceNumberMode>(
-              value: mode,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: 'Invoice numbering',
-                border: OutlineInputBorder(),
-              ),
-              items: const [
-                DropdownMenuItem(
-                  value: InvoiceNumberMode.auto,
-                  child: Text('Auto (INV-0001)', overflow: TextOverflow.ellipsis),
-                ),
-                DropdownMenuItem(
-                  value: InvoiceNumberMode.manual,
-                  child: Text('Manual', overflow: TextOverflow.ellipsis),
-                ),
-              ],
-              onChanged: _saving ? null : (v) => setState(() => mode = v ?? mode),
-            ),
-
-            const SizedBox(height: 14),
-
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _saving ? null : () => Navigator.pop(context),
-                    child: const Text('Cancel'),
+              // ✅ Logo picker
+              Row(
+                children: [
+                  CircleAvatar(
+                    radius: 28,
+                    backgroundImage: logoBytes != null ? MemoryImage(logoBytes) : null,
+                    child: logoBytes == null
+                        ? const Icon(Icons.storefront_outlined)
+                        : null,
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton(
-                    onPressed: _saving ? null : _save,
-                    child: Text(_saving ? 'Saving...' : (isEdit ? 'Update' : 'Save')),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Business logo (optional)',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 10,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: _saving ? null : _pickLogo,
+                              icon: const Icon(Icons.image_outlined),
+                              label: const Text('Choose'),
+                            ),
+                            if (_logoBase64.trim().isNotEmpty)
+                              TextButton.icon(
+                                onPressed: _saving ? null : _removeLogo,
+                                icon: const Icon(Icons.delete_outline),
+                                label: const Text('Remove'),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
+                ],
+              ),
+
+              const SizedBox(height: 12),
+
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Business name *',
+                  border: OutlineInputBorder(),
                 ),
-              ],
-            ),
-          ],
+              ),
+              const SizedBox(height: 10),
+
+              TextField(
+                controller: upiCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'UPI ID (optional)',
+                  border: OutlineInputBorder(),
+                  hintText: 'e.g. jaimin@upi',
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // ✅ keep your phone field setup
+              AppPhoneField(
+                initialText: phoneCtrl.text.replaceAll('+', ''),
+                label: 'Business phone (optional)',
+                onChangedE164: (v) => phoneCtrl.text = v, // stores +91...
+              ),
+              const SizedBox(height: 10),
+
+              TextField(
+                controller: addressCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Address (optional)',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 2,
+              ),
+              const SizedBox(height: 10),
+
+              DropdownButtonFormField<InvoiceNumberMode>(
+                value: mode,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Invoice numbering',
+                  border: OutlineInputBorder(),
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: InvoiceNumberMode.auto,
+                    child: Text('Auto (INV-0001)', overflow: TextOverflow.ellipsis),
+                  ),
+                  DropdownMenuItem(
+                    value: InvoiceNumberMode.manual,
+                    child: Text('Manual', overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+                onChanged: _saving ? null : (v) => setState(() => mode = v ?? mode),
+              ),
+
+              const SizedBox(height: 14),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _saving ? null : () => Navigator.pop(context),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: _saving ? null : _save,
+                      child: Text(_saving ? 'Saving...' : (isEdit ? 'Update' : 'Save')),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
