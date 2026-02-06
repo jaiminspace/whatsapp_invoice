@@ -1,5 +1,5 @@
 import 'dart:convert'; // ✅ for LineSplitter
-import 'package:whatsapp_invoice/features/invoice/domain/invoice_models.dart';
+import 'package:snap_invoice/features/invoice/domain/invoice_models.dart';
 
 String _enumFromString(String s) => s.trim().toLowerCase();
 

@@ -1,4 +1,4 @@
-# whatsapp_invoice
+# snap_invoice
 
 WhatsaApp Invoice
 

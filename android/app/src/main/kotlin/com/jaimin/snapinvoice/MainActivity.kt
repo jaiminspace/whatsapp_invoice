@@ -1,4 +1,4 @@
-package com.appsbyjaimin.whatsapp_invoice
+package com.jaimin.snapinvoice
 
 import io.flutter.embedding.android.FlutterActivity
 

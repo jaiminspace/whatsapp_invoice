@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive/hive.dart';
 
-import 'package:whatsapp_invoice/features/invoice/data/customer_local_repo.dart';
-import 'package:whatsapp_invoice/features/invoice/domain/customer_model.dart';
+import 'package:snap_invoice/features/invoice/data/customer_local_repo.dart';
+import 'package:snap_invoice/features/invoice/domain/customer_model.dart';
 
 final customerRepoProvider = Provider<CustomerLocalRepo>((ref) {
   final box = Hive.box('customers');

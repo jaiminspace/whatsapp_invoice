@@ -1,6 +1,6 @@
 {
-    "name": "whatsapp_invoice",
-    "short_name": "whatsapp_invoice",
+    "name": "snap_invoice",
+    "short_name": "snap_invoice",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
