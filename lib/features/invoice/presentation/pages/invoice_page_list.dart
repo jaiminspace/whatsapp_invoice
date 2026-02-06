@@ -99,7 +99,7 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('InvoiceMaker'),
+        title: const Text('Invoices'),
         actions: [
           IconButton(
             tooltip: 'Businesses',
@@ -112,22 +112,22 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
             },
           ),
           IconButton(
-            tooltip: 'Items Catalog',
-            icon: const Icon(Icons.inventory_2_outlined),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ItemsPage()),
-              );
-            },
-          ),
-          IconButton(
             tooltip: 'Customers',
             icon: const Icon(Icons.people_alt_outlined),
             onPressed: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const CustomersPage()),
+              );
+            },
+          ),
+          IconButton(
+            tooltip: 'Items Catalog',
+            icon: const Icon(Icons.inventory_2_outlined),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ItemsPage()),
               );
             },
           ),
