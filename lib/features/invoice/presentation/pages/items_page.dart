@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/catalog_notifier.dart';
+import '../state/business_list_notifier.dart';
 import '../../domain/item_catalog_models.dart';
 import '../../../../core/ui/app_confirm_dialog.dart';
 
@@ -23,7 +24,10 @@ class _ItemsPageState extends ConsumerState<ItemsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final items = ref.watch(catalogProvider);
+    final biz = ref.watch(selectedBusinessProvider);
+    final bizId = biz?.id ?? '';
+
+    final items = bizId.trim().isEmpty ? <CatalogItem>[] : ref.watch(catalogProvider(bizId));
 
     final q = _searchCtrl.text.trim().toLowerCase();
     final filtered = q.isEmpty
@@ -31,15 +35,18 @@ class _ItemsPageState extends ConsumerState<ItemsPage> {
         : items.where((e) => e.name.toLowerCase().contains(q)).toList();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Items (Catalog)')),
+      appBar: AppBar(
+        title: Text('Items (Catalog)${biz == null ? '' : ' • ${biz.name.isEmpty ? 'Business' : biz.name}'}'),
+      ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openAddOrEdit(context, ref),
+        onPressed: bizId.trim().isEmpty ? null : () => _openAddOrEdit(context, ref, bizId: bizId),
         icon: const Icon(Icons.add),
         label: const Text('Add Item'),
       ),
-      body: Column(
+      body: bizId.trim().isEmpty
+          ? const Center(child: Text('Please add/select a business first.'))
+          : Column(
         children: [
-          // ✅ Search bar
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: TextField(
@@ -64,7 +71,6 @@ class _ItemsPageState extends ConsumerState<ItemsPage> {
               onChanged: (_) => setState(() {}),
             ),
           ),
-
           Expanded(
             child: items.isEmpty
                 ? const Center(child: Text('No items yet.\nTap + to add one.'))
@@ -82,14 +88,13 @@ class _ItemsPageState extends ConsumerState<ItemsPage> {
                 final it = filtered[i];
                 return ListTile(
                   title: Text(it.name.isEmpty ? 'Item' : it.name),
-                  subtitle: Text('₹${it.price.toStringAsFixed(2)}'),
+                  subtitle: Text('₹${it.price.toStringAsFixed(2)} • Unit: ${it.unit.name.toUpperCase()}'),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
                         tooltip: 'Edit',
-                        onPressed: () =>
-                            _openAddOrEdit(context, ref, item: it),
+                        onPressed: () => _openAddOrEdit(context, ref, bizId: bizId, item: it),
                         icon: const Icon(Icons.edit_outlined),
                       ),
                       IconButton(
@@ -103,9 +108,7 @@ class _ItemsPageState extends ConsumerState<ItemsPage> {
                           );
                           if (!ok) return;
 
-                          await ref
-                              .read(catalogProvider.notifier)
-                              .delete(it.id);
+                          await ref.read(catalogProvider(bizId).notifier).delete(it.id);
                         },
                         icon: const Icon(Icons.delete_outline),
                       ),
@@ -123,21 +126,23 @@ class _ItemsPageState extends ConsumerState<ItemsPage> {
   Future<void> _openAddOrEdit(
       BuildContext context,
       WidgetRef ref, {
+        required String bizId,
         CatalogItem? item,
       }) async {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) => _ItemFormSheet(item: item),
+      builder: (_) => _ItemFormSheet(bizId: bizId, item: item),
     );
   }
 }
 
 class _ItemFormSheet extends ConsumerStatefulWidget {
+  final String bizId;
   final CatalogItem? item;
 
-  const _ItemFormSheet({this.item});
+  const _ItemFormSheet({required this.bizId, this.item});
 
   @override
   ConsumerState<_ItemFormSheet> createState() => _ItemFormSheetState();
@@ -146,6 +151,7 @@ class _ItemFormSheet extends ConsumerStatefulWidget {
 class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
   late final TextEditingController nameCtrl;
   late final TextEditingController priceCtrl;
+  late UnitType unit;
 
   @override
   void initState() {
@@ -155,6 +161,7 @@ class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
     priceCtrl = TextEditingController(
       text: it == null ? '' : it!.price.toStringAsFixed(2),
     );
+    unit = it?.unit ?? UnitType.pcs;
   }
 
   @override
@@ -191,6 +198,25 @@ class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
             ),
           ),
           const SizedBox(height: 10),
+
+          DropdownButtonFormField<UnitType>(
+            value: unit,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Unit',
+              border: OutlineInputBorder(),
+            ),
+            items: UnitType.values
+                .map((u) => DropdownMenuItem(
+              value: u,
+              child: Text(u.name.toUpperCase()),
+            ))
+                .toList(),
+            onChanged: (v) => setState(() => unit = v ?? unit),
+          ),
+
+          const SizedBox(height: 10),
+
           TextField(
             controller: priceCtrl,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -214,11 +240,20 @@ class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
               final price = double.tryParse(priceCtrl.text.trim()) ?? 0.0;
 
               if (isEdit) {
-                await ref
-                    .read(catalogProvider.notifier)
-                    .update(widget.item!.copyWith(name: name, price: price));
+                await ref.read(catalogProvider(widget.bizId).notifier).update(
+                  widget.item!.copyWith(
+                    name: name,
+                    price: price,
+                    unit: unit,
+                    businessId: widget.bizId,
+                  ),
+                );
               } else {
-                await ref.read(catalogProvider.notifier).add(name, price);
+                await ref.read(catalogProvider(widget.bizId).notifier).add(
+                  name: name,
+                  price: price,
+                  unit: unit,
+                );
               }
 
               if (mounted) Navigator.pop(context);

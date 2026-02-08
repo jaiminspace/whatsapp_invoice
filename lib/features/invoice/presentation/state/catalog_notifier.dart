@@ -1,47 +1,63 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:hive/hive.dart';
 
 import '../../domain/activity_log_model.dart';
 import '../../domain/item_catalog_models.dart';
 import 'activity_log_notifier.dart';
 
-const kCatalogBoxName = 'catalog_items';
+String catalogBoxNameForBiz(String businessId) => 'catalog_items_$businessId';
 
-final catalogBoxProvider = Provider<Box>((ref) => Hive.box(kCatalogBoxName));
+/// ✅ Box per business
+final catalogBoxProvider = Provider.family<Box, String>((ref, businessId) {
+  return Hive.box(catalogBoxNameForBiz(businessId));
+});
 
-final catalogProvider = NotifierProvider<CatalogNotifier, List<CatalogItem>>(
-  CatalogNotifier.new,
-);
+/// ✅ Provider per business (FAMILY)
+final catalogProvider = StateNotifierProvider.family<CatalogNotifier,
+    List<CatalogItem>, String>((ref, businessId) {
+  return CatalogNotifier(ref: ref, businessId: businessId);
+});
 
-class CatalogNotifier extends Notifier<List<CatalogItem>> {
+class CatalogNotifier extends StateNotifier<List<CatalogItem>> {
+  final Ref ref;
+  final String businessId;
+
   StreamSubscription? _sub;
 
-  Box get _box => ref.read(catalogBoxProvider);
+  CatalogNotifier({
+    required this.ref,
+    required this.businessId,
+  }) : super(const []) {
+    // initial
+    state = _readAll();
+
+    // watch hive changes
+    _sub?.cancel();
+    _sub = _box.watch().listen((_) {
+      state = _readAll();
+    });
+  }
+
+  Box get _box => ref.read(catalogBoxProvider(businessId));
 
   List<CatalogItem> _readAll() {
     final list = _box.values
         .whereType<Map>()
         .map((e) => CatalogItem.fromJson(e))
+        .where((e) => e.businessId.trim().isEmpty || e.businessId == businessId)
         .toList();
 
-    // A–Z sorting
     list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return list;
   }
 
   @override
-  List<CatalogItem> build() {
-    final initial = _readAll();
-
+  void dispose() {
     _sub?.cancel();
-    _sub = _box.watch().listen((_) {
-      state = _readAll();
-    });
-
-    ref.onDispose(() => _sub?.cancel());
-    return initial;
+    super.dispose();
   }
 
   CatalogItem? getById(String id) {
@@ -52,7 +68,11 @@ class CatalogNotifier extends Notifier<List<CatalogItem>> {
     }
   }
 
-  Future<void> add(String name, double price) async {
+  Future<void> add({
+    required String name,
+    required double price,
+    required UnitType unit,
+  }) async {
     final n = name.trim();
     if (n.isEmpty) return;
 
@@ -60,9 +80,11 @@ class CatalogNotifier extends Notifier<List<CatalogItem>> {
 
     final item = CatalogItem(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
+      businessId: businessId,
       name: n,
       price: safePrice < 0 ? 0.0 : safePrice,
-      updatedAt: DateTime.now(), // ✅ required
+      unit: unit,
+      updatedAt: DateTime.now(),
     );
 
     await _box.put(item.id, item.toJson());
@@ -75,8 +97,13 @@ class CatalogNotifier extends Notifier<List<CatalogItem>> {
         entityId: item.id,
         title: 'Item created',
         message:
-        'New item "${item.name.isEmpty ? 'Item' : item.name}" added at ₹${item.price.toStringAsFixed(2)}.',
-        meta: {'name': item.name, 'price': item.price},
+        'New item "${item.name.isEmpty ? 'Item' : item.name}" added (Unit: ${item.unit.name}) at ₹${item.price.toStringAsFixed(2)}.',
+        meta: {
+          'businessId': businessId,
+          'name': item.name,
+          'price': item.price,
+          'unit': item.unit.name,
+        },
       ),
     );
   }
@@ -87,9 +114,10 @@ class CatalogNotifier extends Notifier<List<CatalogItem>> {
         : (item.price < 0 ? 0.0 : item.price);
 
     final updated = item.copyWith(
+      businessId: businessId,
       name: item.name.trim(),
       price: safePrice,
-      updatedAt: DateTime.now(), // ✅ required
+      updatedAt: DateTime.now(),
     );
 
     await _box.put(updated.id, updated.toJson());
@@ -102,8 +130,13 @@ class CatalogNotifier extends Notifier<List<CatalogItem>> {
         entityId: updated.id,
         title: 'Item updated',
         message:
-        'Item "${updated.name.isEmpty ? 'Item' : updated.name}" updated. Price: ₹${updated.price.toStringAsFixed(2)}.',
-        meta: {'name': updated.name, 'price': updated.price},
+        'Item "${updated.name.isEmpty ? 'Item' : updated.name}" updated. Unit: ${updated.unit.name}. Price: ₹${updated.price.toStringAsFixed(2)}.',
+        meta: {
+          'businessId': businessId,
+          'name': updated.name,
+          'price': updated.price,
+          'unit': updated.unit.name,
+        },
       ),
     );
   }
@@ -123,7 +156,12 @@ class CatalogNotifier extends Notifier<List<CatalogItem>> {
         message: old == null
             ? 'Item deleted.'
             : 'Item "${old.name.isEmpty ? 'Item' : old.name}" deleted.',
-        meta: {'name': old?.name ?? '', 'price': old?.price ?? 0.0},
+        meta: {
+          'businessId': businessId,
+          'name': old?.name ?? '',
+          'price': old?.price ?? 0.0,
+          'unit': old?.unit.name ?? UnitType.pcs.name,
+        },
       ),
     );
   }

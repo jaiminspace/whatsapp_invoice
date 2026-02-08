@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../features/invoice/domain/item_catalog_models.dart';
 import '../../features/invoice/presentation/pages/businesses_page.dart';
 import '../../features/invoice/presentation/pages/customers_page.dart';
 import '../../features/invoice/presentation/pages/items_page.dart';
-
 import '../../features/invoice/presentation/state/business_list_notifier.dart';
 import '../../features/invoice/presentation/state/catalog_notifier.dart';
 import '../../features/invoice/presentation/state/customer_notifier.dart';
+
 
 class CreateInvoiceGate {
   /// Call this instead of directly opening CreateInvoicePage.
@@ -25,7 +26,6 @@ class CreateInvoiceGate {
       builder: (_) => const _CreateInvoiceGateSheet(),
     );
 
-    // If user completed business setup, return true
     return ok == true;
   }
 }
@@ -37,13 +37,21 @@ class _CreateInvoiceGateSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final businesses = ref.watch(businessListProvider);
     final customers = ref.watch(customerListProvider);
-    final items = ref.watch(catalogProvider);
 
     final hasBusiness = businesses.isNotEmpty;
     final hasCustomers = customers.isNotEmpty;
+
+    // ✅ pick a safe businessId for catalog watch
+    final selectedBusiness = ref.watch(selectedBusinessProvider);
+    final bizId = selectedBusiness?.id ??
+        (businesses.isNotEmpty ? businesses.first.id : '');
+
+    // ✅ IMPORTANT: catalog is per business
+    final items =
+    bizId.isEmpty ? const <CatalogItem>[] : ref.watch(catalogProvider(bizId));
+
     final hasItems = items.isNotEmpty;
 
-    // ✅ Centered on web + mobile
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 520),
@@ -116,7 +124,7 @@ class _CreateInvoiceGateSheet extends ConsumerWidget {
                   index: 3,
                   title: 'Add Items Catalog (Optional)',
                   subtitle: hasItems
-                      ? 'You have ${items.length} items'
+                      ? 'You have ${items.length} items (for selected business)'
                       : 'Optional, you can add later',
                   done: hasItems,
                   buttonText: hasItems ? 'Manage' : 'Add Items',

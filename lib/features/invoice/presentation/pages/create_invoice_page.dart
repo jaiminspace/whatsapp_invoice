@@ -87,11 +87,21 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
   }
 
   Future<void> _pickCatalogItemForRow(int index) async {
+    final draft = ref.read(invoiceDraftProvider);
+    final bizId = draft.businessId.trim();
+
+    if (bizId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a business first')),
+      );
+      return;
+    }
+
     final selected = await showModalBottomSheet<CatalogItem>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) => const _CatalogPickerSheet(),
+      builder: (_) => _CatalogPickerSheet(bizId: bizId),
     );
 
     if (selected == null) return;
@@ -99,7 +109,11 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
     final notifier = ref.read(invoiceDraftProvider.notifier);
     notifier.updateItemName(index, selected.name);
     notifier.updateItemPrice(index, selected.price);
+
+    // ✅ IMPORTANT for units later:
+    // notifier.updateItemUnit(index, selected.unit);  // (add this when invoice item supports unit)
   }
+
 
   // ✅ one save method used by AppBar + bottom button
   Future<void> _saveInvoice() async {
@@ -560,11 +574,11 @@ class _CustomerPickerSheet extends ConsumerWidget {
 }
 
 class _CatalogPickerSheet extends ConsumerStatefulWidget {
-  const _CatalogPickerSheet();
+  final String bizId;
+  const _CatalogPickerSheet({required this.bizId});
 
   @override
-  ConsumerState<_CatalogPickerSheet> createState() =>
-      _CatalogPickerSheetState();
+  ConsumerState<_CatalogPickerSheet> createState() => _CatalogPickerSheetState();
 }
 
 class _CatalogPickerSheetState extends ConsumerState<_CatalogPickerSheet> {
@@ -578,10 +592,12 @@ class _CatalogPickerSheetState extends ConsumerState<_CatalogPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final all = ref.watch(catalogProvider);
+    final all = ref.watch(catalogProvider(widget.bizId));
+
     final q = _searchCtrl.text.trim().toLowerCase();
-    final list =
-    q.isEmpty ? all : all.where((e) => e.name.toLowerCase().contains(q)).toList();
+    final list = q.isEmpty
+        ? all
+        : all.where((e) => e.name.toLowerCase().contains(q)).toList();
 
     return SafeArea(
       child: Padding(
@@ -624,7 +640,9 @@ class _CatalogPickerSheetState extends ConsumerState<_CatalogPickerSheet> {
                     final it = list[i];
                     return ListTile(
                       title: Text(it.name.isEmpty ? 'Item' : it.name),
-                      subtitle: Text('₹${it.price.toStringAsFixed(2)}'),
+                      subtitle: Text(
+                        '₹${it.price.toStringAsFixed(2)} • ${it.unit.name.toUpperCase()}',
+                      ),
                       onTap: () => Navigator.pop<CatalogItem>(context, it),
                     );
                   },
@@ -636,3 +654,4 @@ class _CatalogPickerSheetState extends ConsumerState<_CatalogPickerSheet> {
     );
   }
 }
+

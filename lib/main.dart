@@ -3,8 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import 'app.dart';
+import 'features/invoice/presentation/state/catalog_notifier.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Hive.initFlutter();
 
@@ -12,12 +13,23 @@ void main() async {
   await Hive.openBox('customers');
   await Hive.openBox('settings');
 
-  // ✅ NEW boxes for multi business + item catalog
+  // ✅ multi-business
   await Hive.openBox('businesses');
-  await Hive.openBox('catalog_items');
 
-  // ✅ NEW box for logs
+  // ✅ logs
   await Hive.openBox('activity_logs');
+
+  // ✅ Open catalog boxes for every existing business
+  final businessesBox = Hive.box('businesses');
+  final businessIds = businessesBox.values
+      .whereType<Map>()
+      .map((m) => (m['id'] ?? '').toString().trim())
+      .where((id) => id.isNotEmpty)
+      .toSet();
+
+  for (final id in businessIds) {
+    await Hive.openBox(catalogBoxNameForBiz(id));
+  }
 
   runApp(const ProviderScope(child: MyApp()));
 }

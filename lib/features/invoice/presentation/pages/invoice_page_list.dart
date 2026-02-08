@@ -5,12 +5,16 @@ import '../../../../core/ui/app_confirm_dialog.dart';
 import '../../../../core/ui/first_run_setup_sheet.dart';
 
 import '../../domain/invoice_models.dart';
+import '../../domain/item_catalog_models.dart'; // ✅ for CatalogItem
 import '../state/invoice_filter_provider.dart';
 import '../state/invoice_list_notifier.dart';
 import '../state/invoice_draft_notifier.dart';
 
 import '../state/customer_notifier.dart';
 import '../state/catalog_notifier.dart';
+
+// ✅ need selected business to pass businessId into catalogProvider(bizId)
+import '../state/business_list_notifier.dart';
 
 import 'create_invoice_page.dart';
 import 'invoice_detail_page.dart';
@@ -55,14 +59,12 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
         context,
         MaterialPageRoute(builder: (_) => const CreateInvoicePage()),
       );
-
     }
 
     // ✅ IMPORTANT: force refresh so newly added/edited invoice shows immediately
     ref.invalidate(invoiceListProvider);
 
     // ❌ Do NOT reset filters/search/date here.
-    // Keep user’s selected Paid/Unpaid/Date range exactly as-is.
   }
 
   Future<void> _openDetail(Invoice inv) async {
@@ -87,7 +89,13 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
     final customRange = ref.watch(invoiceCustomRangeProvider);
 
     final customers = ref.watch(customerListProvider);
-    final items = ref.watch(catalogProvider);
+
+    // ✅ FIX: catalog is now per-business
+    final selectedBiz = ref.watch(selectedBusinessProvider);
+    final bizId = selectedBiz?.id ?? '';
+
+    final List<CatalogItem> items =
+    bizId.trim().isEmpty ? <CatalogItem>[] : ref.watch(catalogProvider(bizId));
 
     final totalPaid = invoices
         .where((e) => e.status == PaymentStatus.paid)
@@ -131,7 +139,6 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
               );
             },
           ),
-          // ✅ Logs icon
           IconButton(
             tooltip: 'Activity Logs',
             icon: const Icon(Icons.history),
@@ -185,19 +192,22 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
                         _chip(
                           label: 'All',
                           selected: filter == InvoiceFilter.all,
-                          onTap: () => ref.read(invoiceFilterProvider.notifier).state = InvoiceFilter.all,
+                          onTap: () => ref.read(invoiceFilterProvider.notifier).state =
+                              InvoiceFilter.all,
                         ),
                         const SizedBox(width: 8),
                         _chip(
                           label: 'Paid',
                           selected: filter == InvoiceFilter.paid,
-                          onTap: () => ref.read(invoiceFilterProvider.notifier).state = InvoiceFilter.paid,
+                          onTap: () => ref.read(invoiceFilterProvider.notifier).state =
+                              InvoiceFilter.paid,
                         ),
                         const SizedBox(width: 8),
                         _chip(
                           label: 'Unpaid',
                           selected: filter == InvoiceFilter.pending,
-                          onTap: () => ref.read(invoiceFilterProvider.notifier).state = InvoiceFilter.pending,
+                          onTap: () => ref.read(invoiceFilterProvider.notifier).state =
+                              InvoiceFilter.pending,
                         ),
                       ],
                     ),
@@ -296,7 +306,9 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
                     );
                     if (!ok) return;
 
-                    await ref.read(invoiceListProvider.notifier).deleteInvoice(inv.id);
+                    await ref
+                        .read(invoiceListProvider.notifier)
+                        .deleteInvoice(inv.id);
                   },
                 ),
               ),
@@ -462,7 +474,10 @@ class _InvoiceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = inv.draft.customerName.trim().isEmpty ? 'Customer' : inv.draft.customerName.trim();
+    final name = inv.draft.customerName.trim().isEmpty
+        ? 'Customer'
+        : inv.draft.customerName.trim();
+
     final invNo = inv.invoiceNumber.trim().isEmpty
         ? 'INV-${inv.id.substring(0, 8).toUpperCase()}'
         : inv.invoiceNumber.trim();
@@ -492,7 +507,6 @@ class _InvoiceCard extends StatelessWidget {
               ),
               const SizedBox(width: 12),
 
-              // Left content
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -517,7 +531,6 @@ class _InvoiceCard extends StatelessWidget {
 
               const SizedBox(width: 10),
 
-              // Right content (no overflow)
               Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.end,
@@ -549,7 +562,9 @@ class _InvoiceCard extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(999),
-                      color: isPaid ? Colors.green.withOpacity(0.16) : Colors.red.withOpacity(0.16),
+                      color: isPaid
+                          ? Colors.green.withOpacity(0.16)
+                          : Colors.red.withOpacity(0.16),
                     ),
                     child: Text(
                       isPaid ? 'PAID' : 'UNPAID',

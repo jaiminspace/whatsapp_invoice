@@ -1,3 +1,61 @@
+import 'item_catalog_models.dart'; // UnitType
+
+enum BusinessType {
+  general,
+  grocery,
+  dairy,
+  hardware,
+  restaurant,
+  service,
+}
+
+extension BusinessTypeX on BusinessType {
+  String get label {
+    switch (this) {
+      case BusinessType.general:
+        return 'General';
+      case BusinessType.grocery:
+        return 'Grocery';
+      case BusinessType.dairy:
+        return 'Dairy';
+      case BusinessType.hardware:
+        return 'Hardware';
+      case BusinessType.restaurant:
+        return 'Restaurant';
+      case BusinessType.service:
+        return 'Service';
+    }
+  }
+}
+
+BusinessType _parseBusinessType(String raw) {
+  final v = raw.trim().toLowerCase();
+  for (final t in BusinessType.values) {
+    if (t.name.toLowerCase() == v) return t;
+  }
+  return BusinessType.general;
+}
+
+UnitType _parseUnit(String raw) {
+  final v = raw.trim().toLowerCase();
+  for (final u in UnitType.values) {
+    if (u.name.toLowerCase() == v) return u;
+  }
+  return UnitType.pcs;
+}
+
+List<UnitType> _parseUnits(dynamic raw) {
+  if (raw is List) {
+    final out = <UnitType>[];
+    for (final e in raw) {
+      out.add(_parseUnit((e ?? '').toString()));
+    }
+    if (out.isNotEmpty) return out;
+  }
+  // ✅ Default allowed units
+  return const [UnitType.pcs, UnitType.kg, UnitType.litre];
+}
+
 class BusinessEntity {
   final String id;
   final String name;
@@ -5,14 +63,14 @@ class BusinessEntity {
   final String phone;
   final String address;
 
-  /// ✅ NEW (file path on device)
   final String? imagePath;
-
-  /// ✅ BACKWARD COMPAT: old code expects this
-  /// (if you used base64 image earlier for PDF/logo)
   final String? logoBase64;
 
   final InvoiceNumberMode invoiceNumberMode;
+
+  final BusinessType businessType;
+  final UnitType defaultUnit;
+  final List<UnitType> allowedUnits;
 
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -28,6 +86,9 @@ class BusinessEntity {
     required this.updatedAt,
     this.imagePath,
     this.logoBase64,
+    this.businessType = BusinessType.general,
+    this.defaultUnit = UnitType.pcs,
+    this.allowedUnits = const [UnitType.pcs, UnitType.kg, UnitType.litre],
   });
 
   factory BusinessEntity.create(String name) {
@@ -43,6 +104,9 @@ class BusinessEntity {
       updatedAt: now,
       imagePath: null,
       logoBase64: null,
+      businessType: BusinessType.general,
+      defaultUnit: UnitType.pcs,
+      allowedUnits: const [UnitType.pcs, UnitType.kg, UnitType.litre],
     );
   }
 
@@ -55,12 +119,11 @@ class BusinessEntity {
     InvoiceNumberMode? invoiceNumberMode,
     DateTime? createdAt,
     DateTime? updatedAt,
-
-    /// ✅ NEW
     String? imagePath,
-
-    /// ✅ BACKWARD COMPAT
     String? logoBase64,
+    BusinessType? businessType,
+    UnitType? defaultUnit,
+    List<UnitType>? allowedUnits,
   }) {
     return BusinessEntity(
       id: id ?? this.id,
@@ -73,6 +136,9 @@ class BusinessEntity {
       updatedAt: updatedAt ?? this.updatedAt,
       imagePath: imagePath ?? this.imagePath,
       logoBase64: logoBase64 ?? this.logoBase64,
+      businessType: businessType ?? this.businessType,
+      defaultUnit: defaultUnit ?? this.defaultUnit,
+      allowedUnits: allowedUnits ?? this.allowedUnits,
     );
   }
 
@@ -85,12 +151,11 @@ class BusinessEntity {
     'invoiceNumberMode': invoiceNumberMode.name,
     'createdAt': createdAt.toIso8601String(),
     'updatedAt': updatedAt.toIso8601String(),
-
-    /// ✅ NEW
     'imagePath': imagePath,
-
-    /// ✅ BACKWARD COMPAT
     'logoBase64': logoBase64,
+    'businessType': businessType.name,
+    'defaultUnit': defaultUnit.name,
+    'allowedUnits': allowedUnits.map((e) => e.name).toList(),
   };
 
   factory BusinessEntity.fromJson(Map json) {
@@ -112,12 +177,11 @@ class BusinessEntity {
           DateTime.now(),
       updatedAt: DateTime.tryParse((json['updatedAt'] ?? '').toString()) ??
           DateTime.now(),
-
-      /// ✅ NEW (backward compatible)
       imagePath: _cleanNullable(json['imagePath']),
-
-      /// ✅ BACKWARD COMPAT (so existing notifier/PDF keeps working)
       logoBase64: _cleanNullable(json['logoBase64']),
+      businessType: _parseBusinessType((json['businessType'] ?? '').toString()),
+      defaultUnit: _parseUnit((json['defaultUnit'] ?? '').toString()),
+      allowedUnits: _parseUnits(json['allowedUnits']),
     );
   }
 
