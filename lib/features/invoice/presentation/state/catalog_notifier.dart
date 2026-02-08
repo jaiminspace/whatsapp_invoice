@@ -1,3 +1,5 @@
+// catalog_notifier.dart
+
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,46 +10,37 @@ import '../../domain/activity_log_model.dart';
 import '../../domain/item_catalog_models.dart';
 import 'activity_log_notifier.dart';
 
-String catalogBoxNameForBiz(String businessId) => 'catalog_items_$businessId';
+const kCatalogBoxName = 'catalog_items';
 
-/// ✅ Box per business
-final catalogBoxProvider = Provider.family<Box, String>((ref, businessId) {
-  return Hive.box(catalogBoxNameForBiz(businessId));
+final catalogBoxProvider = Provider<Box>((ref) {
+  // ✅ must be opened in main.dart before runApp
+  return Hive.box(kCatalogBoxName);
 });
 
-/// ✅ Provider per business (FAMILY)
-final catalogProvider = StateNotifierProvider.family<CatalogNotifier,
-    List<CatalogItem>, String>((ref, businessId) {
-  return CatalogNotifier(ref: ref, businessId: businessId);
+final catalogProvider =
+StateNotifierProvider<CatalogNotifier, List<CatalogItem>>((ref) {
+  return CatalogNotifier(ref);
 });
 
 class CatalogNotifier extends StateNotifier<List<CatalogItem>> {
   final Ref ref;
-  final String businessId;
-
   StreamSubscription? _sub;
 
-  CatalogNotifier({
-    required this.ref,
-    required this.businessId,
-  }) : super(const []) {
-    // initial
+  CatalogNotifier(this.ref) : super(const []) {
     state = _readAll();
 
-    // watch hive changes
     _sub?.cancel();
     _sub = _box.watch().listen((_) {
       state = _readAll();
     });
   }
 
-  Box get _box => ref.read(catalogBoxProvider(businessId));
+  Box get _box => ref.read(catalogBoxProvider);
 
   List<CatalogItem> _readAll() {
     final list = _box.values
         .whereType<Map>()
         .map((e) => CatalogItem.fromJson(e))
-        .where((e) => e.businessId.trim().isEmpty || e.businessId == businessId)
         .toList();
 
     list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
@@ -72,6 +65,7 @@ class CatalogNotifier extends StateNotifier<List<CatalogItem>> {
     required String name,
     required double price,
     required UnitType unit,
+    required List<String> businessIds,
   }) async {
     final n = name.trim();
     if (n.isEmpty) return;
@@ -80,10 +74,10 @@ class CatalogNotifier extends StateNotifier<List<CatalogItem>> {
 
     final item = CatalogItem(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
-      businessId: businessId,
       name: n,
       price: safePrice < 0 ? 0.0 : safePrice,
       unit: unit,
+      businessIds: businessIds.toSet().toList(),
       updatedAt: DateTime.now(),
     );
 
@@ -97,12 +91,12 @@ class CatalogNotifier extends StateNotifier<List<CatalogItem>> {
         entityId: item.id,
         title: 'Item created',
         message:
-        'New item "${item.name.isEmpty ? 'Item' : item.name}" added (Unit: ${item.unit.name}) at ₹${item.price.toStringAsFixed(2)}.',
+        'New item "${item.name.isEmpty ? 'Item' : item.name}" added (${item.unit.name}).',
         meta: {
-          'businessId': businessId,
           'name': item.name,
           'price': item.price,
           'unit': item.unit.name,
+          'businessIds': item.businessIds,
         },
       ),
     );
@@ -114,9 +108,9 @@ class CatalogNotifier extends StateNotifier<List<CatalogItem>> {
         : (item.price < 0 ? 0.0 : item.price);
 
     final updated = item.copyWith(
-      businessId: businessId,
       name: item.name.trim(),
       price: safePrice,
+      businessIds: item.businessIds.toSet().toList(),
       updatedAt: DateTime.now(),
     );
 
@@ -130,12 +124,12 @@ class CatalogNotifier extends StateNotifier<List<CatalogItem>> {
         entityId: updated.id,
         title: 'Item updated',
         message:
-        'Item "${updated.name.isEmpty ? 'Item' : updated.name}" updated. Unit: ${updated.unit.name}. Price: ₹${updated.price.toStringAsFixed(2)}.',
+        'Item "${updated.name.isEmpty ? 'Item' : updated.name}" updated.',
         meta: {
-          'businessId': businessId,
           'name': updated.name,
           'price': updated.price,
           'unit': updated.unit.name,
+          'businessIds': updated.businessIds,
         },
       ),
     );
@@ -157,10 +151,10 @@ class CatalogNotifier extends StateNotifier<List<CatalogItem>> {
             ? 'Item deleted.'
             : 'Item "${old.name.isEmpty ? 'Item' : old.name}" deleted.',
         meta: {
-          'businessId': businessId,
           'name': old?.name ?? '',
           'price': old?.price ?? 0.0,
           'unit': old?.unit.name ?? UnitType.pcs.name,
+          'businessIds': old?.businessIds ?? <String>[],
         },
       ),
     );

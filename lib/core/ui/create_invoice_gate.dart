@@ -48,7 +48,7 @@ class _CreateInvoiceGateSheet extends ConsumerWidget {
 
     // ✅ IMPORTANT: catalog is per business
     final items =
-    bizId.isEmpty ? const <CatalogItem>[] : ref.watch(catalogProvider(bizId));
+    bizId.isEmpty ? const <CatalogItem>[] : ref.watch(catalogProvider);
 
     final hasItems = items.isNotEmpty;
 

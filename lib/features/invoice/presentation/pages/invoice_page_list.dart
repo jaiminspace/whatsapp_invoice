@@ -95,8 +95,7 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
     final bizId = selectedBiz?.id ?? '';
 
     final List<CatalogItem> items =
-    bizId.trim().isEmpty ? <CatalogItem>[] : ref.watch(catalogProvider(bizId));
-
+    bizId.trim().isEmpty ? <CatalogItem>[] : ref.watch(catalogProvider);
     final totalPaid = invoices
         .where((e) => e.status == PaymentStatus.paid)
         .fold<double>(0, (p, e) => p + e.total);

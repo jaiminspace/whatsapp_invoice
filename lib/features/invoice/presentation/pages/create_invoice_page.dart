@@ -4,7 +4,6 @@ import 'package:intl/intl.dart';
 
 import '../state/invoice_list_notifier.dart';
 import '../state/customer_notifier.dart';
-import '../state/invoice_filter_provider.dart';
 
 import '../../../../core/ui/app_confirm_dialog.dart';
 import '../../domain/business_profile.dart';
@@ -245,7 +244,7 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
           // BUSINESS
           if (businesses.isNotEmpty)
             DropdownButtonFormField<String>(
-              value: safeBusinessId,
+              initialValue: safeBusinessId,
               decoration: const InputDecoration(
                 labelText: 'Business',
                 border: OutlineInputBorder(),
@@ -284,7 +283,7 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
 
           // ✅ INVOICE TYPE (Paid/Unpaid)
           DropdownButtonFormField<PaymentStatus>(
-            value: draft.status,
+            initialValue: draft.status,
             decoration: const InputDecoration(
               labelText: 'Invoice Type',
               border: OutlineInputBorder(),
@@ -592,12 +591,20 @@ class _CatalogPickerSheetState extends ConsumerState<_CatalogPickerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final all = ref.watch(catalogProvider(widget.bizId));
+    final all = ref.watch(catalogProvider);
+
+    // ✅ Filter items for selected business:
+    // - if item.businessIds is empty => global for all
+    // - else must contain selected bizId
+    final visible = all.where((it) {
+      if (it.businessIds.isEmpty) return true;
+      return it.businessIds.contains(widget.bizId);
+    }).toList();
 
     final q = _searchCtrl.text.trim().toLowerCase();
     final list = q.isEmpty
-        ? all
-        : all.where((e) => e.name.toLowerCase().contains(q)).toList();
+        ? visible
+        : visible.where((e) => e.name.toLowerCase().contains(q)).toList();
 
     return SafeArea(
       child: Padding(
@@ -625,10 +632,13 @@ class _CatalogPickerSheetState extends ConsumerState<_CatalogPickerSheet> {
               onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 10),
-            if (all.isEmpty)
+            if (visible.isEmpty)
               const Padding(
                 padding: EdgeInsets.all(16),
-                child: Text('No catalog items found.\nAdd items from Items page.'),
+                child: Text(
+                  'No catalog items for this business.\nAdd items from Items page.',
+                  textAlign: TextAlign.center,
+                ),
               )
             else
               Flexible(
@@ -654,4 +664,5 @@ class _CatalogPickerSheetState extends ConsumerState<_CatalogPickerSheet> {
     );
   }
 }
+
 

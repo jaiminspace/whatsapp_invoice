@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../domain/invoice_models.dart';
+import 'business_list_notifier.dart';
 
 final invoiceDraftProvider =
 NotifierProvider<InvoiceDraftNotifier, InvoiceDraft>(
@@ -8,15 +10,70 @@ NotifierProvider<InvoiceDraftNotifier, InvoiceDraft>(
 
 class InvoiceDraftNotifier extends Notifier<InvoiceDraft> {
   @override
-  InvoiceDraft build() => InvoiceDraft.empty();
+  InvoiceDraft build() {
+    // ✅ If a business is already selected / exists, set it as default in new draft
+    final defaultBizId = _defaultBusinessId();
+    final draft = InvoiceDraft.empty();
 
-  void reset() => state = InvoiceDraft.empty();
+    if (defaultBizId.isNotEmpty) {
+      return draft.copyWith(businessId: defaultBizId);
+    }
+    return draft;
+  }
+
+  /// ✅ Get default businessId:
+  /// 1) selectedBusinessIdProvider if set
+  /// 2) else first business in list
+  /// 3) else ''
+  String _defaultBusinessId() {
+    final selectedId = ref.read(selectedBusinessIdProvider);
+    if (selectedId != null && selectedId.trim().isNotEmpty) {
+      return selectedId.trim();
+    }
+
+    final list = ref.read(businessListProvider);
+    if (list.isNotEmpty) return list.first.id;
+
+    return '';
+  }
+
+  /// ✅ Call this from places where business list may have changed
+  /// (optional but prevents "stale businessId" bugs)
+  void ensureBusinessIsValid() {
+    final list = ref.read(businessListProvider);
+    if (list.isEmpty) {
+      if (state.businessId.trim().isNotEmpty) {
+        state = state.copyWith(businessId: '');
+      }
+      return;
+    }
+
+    final current = state.businessId.trim();
+    final exists = list.any((b) => b.id == current);
+
+    if (!exists) {
+      final fallback = _defaultBusinessId();
+      state = state.copyWith(businessId: fallback);
+    }
+  }
+
+  /// ✅ Reset draft but keep default business selection
+  void reset() {
+    final defaultBizId = _defaultBusinessId();
+    final fresh = InvoiceDraft.empty();
+
+    state = defaultBizId.isEmpty ? fresh : fresh.copyWith(businessId: defaultBizId);
+  }
 
   void loadFromInvoice(Invoice invoice) {
+    // ✅ Keep invoice businessId as it was when invoice was created
     state = invoice.draft.copyWith(
       invoiceDateTime: invoice.createdAt,
-      status: invoice.status, // ✅ important for edit
+      status: invoice.status,
     );
+
+    // ✅ If business got deleted later, fall back safely
+    ensureBusinessIsValid();
   }
 
   void setCustomerName(String v) =>
@@ -31,9 +88,15 @@ class InvoiceDraftNotifier extends Notifier<InvoiceDraft> {
   void setInvoiceDateTime(DateTime dt) =>
       state = state.copyWith(invoiceDateTime: dt);
 
-  void setBusinessId(String id) => state = state.copyWith(businessId: id);
+  void setBusinessId(String id) {
+    final trimmed = id.trim();
+    state = state.copyWith(businessId: trimmed);
 
-  // ✅ NEW
+    // ✅ also sync selectedBusinessIdProvider (so next invoice opens with this)
+    ref.read(selectedBusinessIdProvider.notifier).state =
+    trimmed.isEmpty ? null : trimmed;
+  }
+
   void setInvoiceStatus(PaymentStatus status) =>
       state = state.copyWith(status: status);
 
@@ -111,7 +174,7 @@ class InvoiceDraftNotifier extends Notifier<InvoiceDraft> {
     updated[index] = updated[index].copyWith(price: safePrice);
     state = state.copyWith(items: updated);
 
-    // ✅ merge after price update (safe + prevents duplicates)
+    // ✅ merge after price update (prevents duplicates)
     _applyMergedItems();
   }
 
