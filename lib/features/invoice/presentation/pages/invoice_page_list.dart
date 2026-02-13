@@ -36,6 +36,23 @@ class InvoiceListPage extends ConsumerStatefulWidget {
 class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
   final _searchCtrl = TextEditingController();
 
+  // ✅ ensures FirstRunSetupSheet is checked only once per page lifecycle
+  bool _didRunFirstRunSheetCheck = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // ✅ IMPORTANT: do NOT run this inside build()
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_didRunFirstRunSheetCheck) return;
+      _didRunFirstRunSheetCheck = true;
+
+      FirstRunSetupSheet.maybeShow(context, ref);
+    });
+  }
+
   @override
   void dispose() {
     _searchCtrl.dispose();
@@ -76,9 +93,10 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
 
   @override
   Widget build(BuildContext context) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      FirstRunSetupSheet.maybeShow(context, ref);
-    });
+    // ❌ REMOVED from build:
+    // WidgetsBinding.instance.addPostFrameCallback((_) {
+    //   FirstRunSetupSheet.maybeShow(context, ref);
+    // });
 
     final invoices = ref.watch(filteredInvoicesProvider);
 
@@ -96,6 +114,7 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
 
     final List<CatalogItem> items =
     bizId.trim().isEmpty ? <CatalogItem>[] : ref.watch(catalogProvider);
+
     final totalPaid = invoices
         .where((e) => e.status == PaymentStatus.paid)
         .fold<double>(0, (p, e) => p + e.total);
@@ -305,9 +324,7 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
                     );
                     if (!ok) return;
 
-                    await ref
-                        .read(invoiceListProvider.notifier)
-                        .deleteInvoice(inv.id);
+                    await ref.read(invoiceListProvider.notifier).deleteInvoice(inv.id);
                   },
                 ),
               ),
