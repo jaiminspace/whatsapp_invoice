@@ -6,6 +6,10 @@ import 'package:hive/hive.dart';
 import 'package:snap_invoice/features/invoice/data/customer_local_repo.dart';
 import 'package:snap_invoice/features/invoice/domain/customer_model.dart';
 
+// ✅ logs (same pattern as CatalogNotifier)
+import '../../domain/activity_log_model.dart';
+import 'activity_log_notifier.dart';
+
 final customerRepoProvider = Provider<CustomerLocalRepo>((ref) {
   final box = Hive.box('customers');
   return CustomerLocalRepo(box);
@@ -42,6 +46,11 @@ class CustomerListNotifier extends Notifier<List<Customer>> {
     } catch (_) {
       return null;
     }
+  }
+
+  String _safeName(String raw) {
+    final n = raw.trim();
+    return n.isEmpty ? 'Customer' : n;
   }
 
   /// Unified add/update used by CustomersPage bottomsheet.
@@ -101,8 +110,51 @@ class CustomerListNotifier extends Notifier<List<Customer>> {
       updatedAt: now,
     );
 
+    final isEdit = old != null;
+
     await repo.upsert(customer);
     state = List<Customer>.from(repo.getAll());
+
+    // ✅ LOGS
+    if (!isEdit) {
+      await ref.read(activityLogProvider.notifier).addLog(
+        ActivityLog.create(
+          entity: LogEntity.customer,
+          action: LogAction.create,
+          entityId: customer.id,
+          title: 'Customer created',
+          message:
+          'New customer "${_safeName(customer.name)}" added (Phone: ${customer.mobile}).',
+          meta: {
+            'name': customer.name,
+            'mobile': customer.mobile,
+            'address': customer.address ?? '',
+            'imagePath': customer.imagePath ?? '',
+          },
+        ),
+      );
+    } else {
+      final oldName = _safeName(old!.name);
+      final newName = _safeName(customer.name);
+
+      await ref.read(activityLogProvider.notifier).addLog(
+        ActivityLog.create(
+          entity: LogEntity.customer,
+          action: LogAction.update,
+          entityId: customer.id,
+          title: 'Customer updated',
+          message: oldName == newName
+              ? 'Customer "$newName" updated (Phone: ${customer.mobile}).'
+              : 'Customer "$oldName" updated to "$newName" (Phone: ${customer.mobile}).',
+          meta: {
+            'name': customer.name,
+            'mobile': customer.mobile,
+            'address': customer.address ?? '',
+            'imagePath': customer.imagePath ?? '',
+          },
+        ),
+      );
+    }
   }
 
   /// Used from invoice save flow (id = mobile)
@@ -125,11 +177,51 @@ class CustomerListNotifier extends Notifier<List<Customer>> {
       updatedAt: DateTime.now(),
     );
 
+    final wasNew = old == null;
+
     await repo.upsert(c);
     state = List<Customer>.from(repo.getAll());
-  }
 
-  // Optional: keep existing APIs (if used elsewhere)
+    // ✅ Optional logs (only if NEW, or name changed)
+    if (wasNew) {
+      await ref.read(activityLogProvider.notifier).addLog(
+        ActivityLog.create(
+          entity: LogEntity.customer,
+          action: LogAction.create,
+          entityId: c.id,
+          title: 'Customer created',
+          message:
+          'New customer "${_safeName(c.name)}" added from invoice (Phone: ${c.mobile}).',
+          meta: {
+            'name': c.name,
+            'mobile': c.mobile,
+            'address': c.address ?? '',
+            'imagePath': c.imagePath ?? '',
+            'source': 'invoice',
+          },
+        ),
+      );
+    } else if ((old?.name ?? '').trim() != c.name.trim() &&
+        c.name.trim().isNotEmpty) {
+      await ref.read(activityLogProvider.notifier).addLog(
+        ActivityLog.create(
+          entity: LogEntity.customer,
+          action: LogAction.update,
+          entityId: c.id,
+          title: 'Customer updated',
+          message:
+          'Customer "${_safeName(old?.name ?? '')}" updated from invoice to "${_safeName(c.name)}".',
+          meta: {
+            'name': c.name,
+            'mobile': c.mobile,
+            'address': c.address ?? '',
+            'imagePath': c.imagePath ?? '',
+            'source': 'invoice',
+          },
+        ),
+      );
+    }
+  }
 
   Future<void> addCustomer({
     required String name,
@@ -166,7 +258,28 @@ class CustomerListNotifier extends Notifier<List<Customer>> {
   }
 
   Future<void> deleteCustomer(String id) async {
+    final old = getById(id);
+
     await repo.delete(id);
     state = List<Customer>.from(repo.getAll());
+
+    // ✅ LOG
+    await ref.read(activityLogProvider.notifier).addLog(
+      ActivityLog.create(
+        entity: LogEntity.customer,
+        action: LogAction.delete,
+        entityId: id,
+        title: 'Customer deleted',
+        message: old == null
+            ? 'Customer deleted.'
+            : 'Customer "${_safeName(old.name)}" deleted (Phone: ${old.mobile}).',
+        meta: {
+          'name': old?.name ?? '',
+          'mobile': old?.mobile ?? '',
+          'address': old?.address ?? '',
+          'imagePath': old?.imagePath ?? '',
+        },
+      ),
+    );
   }
 }

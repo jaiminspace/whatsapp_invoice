@@ -113,9 +113,9 @@ class _ItemsPageState extends ConsumerState<ItemsPage> {
                           final ok = await AppConfirmDialog.show(
                             context,
                             title: 'Delete item?',
-                            message:
-                            'This will remove "${it.name}".',
+                            message: 'This will remove "${it.name}".',
                             confirmText: 'Delete',
+                            isDanger: true,
                           );
                           if (!ok) return;
 
@@ -164,18 +164,28 @@ class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
   late final TextEditingController priceCtrl;
 
   late UnitType unit;
+
+  // ✅ FIX: separate global flag from biz selection
+  late bool isGlobal;
   late Set<String> selectedBizIds;
 
   @override
   void initState() {
     super.initState();
     final it = widget.item;
+
     nameCtrl = TextEditingController(text: it?.name ?? '');
     priceCtrl = TextEditingController(
       text: it == null ? '' : it.price.toStringAsFixed(2),
     );
+
     unit = it?.unit ?? UnitType.pcs;
+
     selectedBizIds = {...(it?.businessIds ?? const <String>[])};
+
+    // ✅ New item defaults to global; edit uses existing state
+    isGlobal = it == null ? true : selectedBizIds.isEmpty;
+    if (isGlobal) selectedBizIds.clear();
   }
 
   @override
@@ -205,7 +215,6 @@ class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 12),
-
           TextField(
             controller: nameCtrl,
             decoration: const InputDecoration(
@@ -214,7 +223,6 @@ class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
             ),
           ),
           const SizedBox(height: 10),
-
           DropdownButtonFormField<UnitType>(
             value: unit,
             isExpanded: true,
@@ -223,16 +231,16 @@ class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
               border: OutlineInputBorder(),
             ),
             items: UnitType.values
-                .map((u) => DropdownMenuItem(
-              value: u,
-              child: Text(u.name.toUpperCase()),
-            ))
+                .map(
+                  (u) => DropdownMenuItem(
+                value: u,
+                child: Text(u.name.toUpperCase()),
+              ),
+            )
                 .toList(),
             onChanged: (v) => setState(() => unit = v ?? unit),
           ),
-
           const SizedBox(height: 10),
-
           TextField(
             controller: priceCtrl,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -242,10 +250,9 @@ class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
               prefixText: '₹ ',
             ),
           ),
-
           const SizedBox(height: 12),
 
-          // ✅ Multi business selection
+          // ✅ Multi business selection (fixed: can untick global)
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
@@ -279,24 +286,28 @@ class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
               child: Column(
                 children: [
                   CheckboxListTile(
-                    value: selectedBizIds.isEmpty,
+                    value: isGlobal,
                     title: const Text('Global (All businesses)'),
-                    subtitle: const Text('If selected, it will appear everywhere'),
+                    subtitle:
+                    const Text('If selected, it will appear everywhere'),
                     onChanged: (v) {
                       setState(() {
-                        if (v == true) selectedBizIds.clear();
+                        isGlobal = v ?? true;
+                        if (isGlobal) selectedBizIds.clear();
                       });
                     },
                   ),
                   const Divider(height: 1),
+
                   ...businesses.map((b) {
                     final checked = selectedBizIds.contains(b.id);
+
                     return CheckboxListTile(
                       value: checked,
                       title: Text(b.name.isEmpty ? 'Business' : b.name),
                       subtitle: Text(b.id),
-                      onChanged: selectedBizIds.isEmpty
-                          ? null // when global, disable individual selection
+                      onChanged: isGlobal
+                          ? null
                           : (v) {
                         setState(() {
                           if (v == true) {
@@ -308,17 +319,6 @@ class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
                       },
                     );
                   }).toList(),
-                  if (selectedBizIds.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(12, 0, 12, 12),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Tip: Untick Global by selecting any business first (edit rule).',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                      ),
-                    ),
                 ],
               ),
             ),
@@ -336,7 +336,18 @@ class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
               }
 
               final price = double.tryParse(priceCtrl.text.trim()) ?? 0.0;
-              final bizIds = selectedBizIds.toList();
+
+              // ✅ If global => store empty list
+              final bizIds = isGlobal ? <String>[] : selectedBizIds.toList();
+
+              if (!isGlobal && businesses.isNotEmpty && bizIds.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Select at least one business OR choose Global'),
+                  ),
+                );
+                return;
+              }
 
               if (isEdit) {
                 await ref.read(catalogProvider.notifier).update(

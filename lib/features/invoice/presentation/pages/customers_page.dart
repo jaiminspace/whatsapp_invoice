@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../core/ui/app_confirm_dialog.dart';
 import '../../../../core/ui/app_phone_field.dart';
@@ -12,11 +13,9 @@ import '../state/customer_notifier.dart';
 class CustomersPage extends ConsumerStatefulWidget {
   const CustomersPage({
     super.key,
-    this.autoOpenAddIfEmpty = false, // 👈 enable only if you want initial flow
+    this.autoOpenAddIfEmpty = false,
   });
 
-  /// If true: when page is first shown AND customers list is empty,
-  /// open the Add Customer sheet once.
   final bool autoOpenAddIfEmpty;
 
   @override
@@ -26,17 +25,13 @@ class CustomersPage extends ConsumerStatefulWidget {
 class _CustomersPageState extends ConsumerState<CustomersPage> {
   final _searchCtrl = TextEditingController();
 
-  // ✅ prevents re-entrancy while sheet opening/open
   bool _isSheetOpen = false;
-
-  // ✅ prevents "initial flow" from opening again on back/rebuild
   bool _didAutoOpenOnce = false;
 
   @override
   void initState() {
     super.initState();
 
-    // ✅ Auto-open ONLY ONCE, and NEVER from build().
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       if (!widget.autoOpenAddIfEmpty) return;
@@ -57,7 +52,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
   }
 
   Future<void> _openAddOrEdit(BuildContext context, {Customer? customer}) async {
-    if (_isSheetOpen) return; // ✅ HARD LOCK
+    if (_isSheetOpen) return;
     _isSheetOpen = true;
 
     try {
@@ -83,6 +78,33 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     return digitsOnly.hasMatch(v) || e164.hasMatch(v);
   }
 
+  Future<void> _launch(Uri uri) async {
+    final ok = await canLaunchUrl(uri);
+    if (!ok) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  Future<void> _call(String phone) async {
+    final p = phone.trim();
+    if (p.isEmpty) return;
+    await _launch(Uri(scheme: 'tel', path: p));
+  }
+
+  Future<void> _sms(String phone) async {
+    final p = phone.trim();
+    if (p.isEmpty) return;
+    await _launch(Uri(scheme: 'sms', path: p));
+  }
+
+  Future<void> _whatsapp(String phoneE164) async {
+    // WhatsApp expects digits only, without '+'
+    final p = phoneE164.trim();
+    if (p.isEmpty) return;
+
+    final normalized = p.startsWith('+') ? p.substring(1) : p;
+    await _launch(Uri.parse('https://wa.me/$normalized'));
+  }
+
   @override
   Widget build(BuildContext context) {
     final customers = ref.watch(customerListProvider);
@@ -105,114 +127,466 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
         icon: const Icon(Icons.add),
         label: const Text('Add Customer'),
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: TextField(
-              controller: _searchCtrl,
-              decoration: InputDecoration(
-                hintText: 'Search name or mobile...',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searchCtrl.text.trim().isEmpty
-                    ? null
-                    : IconButton(
-                  tooltip: 'Clear',
-                  icon: const Icon(Icons.close),
-                  onPressed: () {
-                    _searchCtrl.clear();
-                    setState(() {});
-                  },
+      body: SafeArea(
+        child: Column(
+          children: [
+            // ---------------- Search ----------------
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+              child: TextField(
+                controller: _searchCtrl,
+                textInputAction: TextInputAction.search,
+                decoration: InputDecoration(
+                  hintText: 'Search name or phone…',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _searchCtrl.text.trim().isEmpty
+                      ? null
+                      : IconButton(
+                    tooltip: 'Clear',
+                    icon: const Icon(Icons.close),
+                    onPressed: () {
+                      _searchCtrl.clear();
+                      setState(() {});
+                    },
+                  ),
+                  filled: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
+                onChanged: (_) => setState(() {}),
               ),
-              onChanged: (_) => setState(() {}),
             ),
-          ),
-          Expanded(
-            child: customers.isEmpty
-                ? const Center(
-              child: Text('No customers yet.\nTap + to add one.'),
-            )
-                : filtered.isEmpty
-                ? Center(
-              child: Text(
-                'No results for "${_searchCtrl.text.trim()}"',
-                textAlign: TextAlign.center,
-              ),
-            )
-                : ListView.separated(
-              itemCount: filtered.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
-              itemBuilder: (context, i) {
-                final c = filtered[i];
-                final phoneOk = _isValidPhone(c.mobile);
 
-                final hasImage = c.imagePath != null &&
-                    c.imagePath!.trim().isNotEmpty &&
-                    File(c.imagePath!).existsSync();
+            // ---------------- List ----------------
+            Expanded(
+              child: customers.isEmpty
+                  ? const _EmptyState()
+                  : filtered.isEmpty
+                  ? _NoResultsState(query: _searchCtrl.text.trim())
+                  : ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+                itemCount: filtered.length,
+                itemBuilder: (context, i) {
+                  final c = filtered[i];
+                  final phoneOk = _isValidPhone(c.mobile);
 
-                return ListTile(
-                  leading: CircleAvatar(
-                    backgroundImage:
-                    hasImage ? FileImage(File(c.imagePath!)) : null,
-                    child: hasImage
-                        ? null
-                        : Text(
-                      (c.name.trim().isEmpty
-                          ? 'C'
-                          : c.name.trim()[0])
-                          .toUpperCase(),
-                    ),
-                  ),
-                  title: Text(c.name.isEmpty ? 'Customer' : c.name),
-                  subtitle: Text(
-                    phoneOk ? c.mobile : '${c.mobile}  (invalid)',
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        tooltip: 'Edit',
-                        onPressed: _isSheetOpen
-                            ? null
-                            : () => _openAddOrEdit(
+                  final hasImage = c.imagePath != null &&
+                      c.imagePath!.trim().isNotEmpty &&
+                      File(c.imagePath!).existsSync();
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _CustomerModernCard(
+                      customer: c,
+                      hasImage: hasImage,
+                      phoneOk: phoneOk,
+                      onEdit: () => _openAddOrEdit(context, customer: c),
+                      onDelete: () async {
+                        final ok = await AppConfirmDialog.show(
                           context,
-                          customer: c,
-                        ),
-                        icon: const Icon(Icons.edit_outlined),
-                      ),
-                      IconButton(
-                        tooltip: 'Delete',
-                        onPressed: () async {
-                          final ok = await AppConfirmDialog.show(
-                            context,
-                            title: 'Delete customer?',
-                            message:
-                            'This will remove "${c.name.isEmpty ? 'Customer' : c.name}".',
-                            confirmText: 'Delete',
-                          );
-                          if (!ok) return;
+                          title: 'Delete customer?',
+                          message:
+                          'This will remove "${c.name.isEmpty ? 'Customer' : c.name}".',
+                          confirmText: 'Delete',
+                          isDanger: true,
+                        );
+                        if (!ok) return;
 
-                          await ref
-                              .read(customerListProvider.notifier)
-                              .deleteCustomer(c.id);
-                        },
-                        icon: const Icon(Icons.delete_outline),
+                        await ref
+                            .read(customerListProvider.notifier)
+                            .deleteCustomer(c.id);
+                      },
+                      onCall: phoneOk ? () => _call(c.mobile) : null,
+                      onSms: phoneOk ? () => _sms(c.mobile) : null,
+                      onWhatsapp: phoneOk ? () => _whatsapp(c.mobile) : null,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Modern Customer Card
+// ============================================================================
+
+class _CustomerModernCard extends StatelessWidget {
+  final Customer customer;
+  final bool hasImage;
+  final bool phoneOk;
+
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  final VoidCallback? onCall;
+  final VoidCallback? onSms;
+  final VoidCallback? onWhatsapp;
+
+  const _CustomerModernCard({
+    required this.customer,
+    required this.hasImage,
+    required this.phoneOk,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onCall,
+    required this.onSms,
+    required this.onWhatsapp,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    final name = customer.name.trim().isEmpty ? 'Customer' : customer.name.trim();
+    final phone = customer.mobile.trim();
+    final address = (customer.address ?? '').trim();
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cs.outlineVariant.withOpacity(0.35)),
+        color: cs.surface,
+      ),
+      child: Column(
+        children: [
+          // -------- top row --------
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                radius: 24,
+                backgroundImage:
+                hasImage ? FileImage(File(customer.imagePath!)) : null,
+                child: hasImage
+                    ? null
+                    : Text(
+                  name.characters.first.toUpperCase(),
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+              const SizedBox(width: 12),
+
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Name (no ellipsis)
+                    Text(
+                      name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 16,
+                      ),
+                      maxLines: null,
+                      softWrap: true,
+                    ),
+                    const SizedBox(height: 6),
+
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.call_outlined,
+                              size: 16,
+                              color: cs.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              phone.isEmpty ? '-' : phone,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: cs.onSurfaceVariant,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: null,
+                              softWrap: true,
+                            ),
+                          ],
+                        ),
+                        if (!phoneOk && phone.isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: cs.error.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              'Invalid',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                                color: cs.error,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+
+                    if (address.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.location_on_outlined,
+                            size: 16,
+                            color: cs.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              address,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: cs.onSurfaceVariant,
+                              ),
+                              maxLines: null,
+                              softWrap: true,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
+                  ],
+                ),
+              ),
+
+              PopupMenuButton<String>(
+                tooltip: 'Options',
+                onSelected: (v) {
+                  if (v == 'edit') onEdit();
+                  if (v == 'delete') onDelete();
+                },
+                itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'edit', child: Text('Edit')),
+                  PopupMenuItem(value: 'delete', child: Text('Delete')),
+                ],
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 6, top: 2),
+                  child: Icon(Icons.more_vert, color: cs.onSurfaceVariant),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          // -------- actions (overflow safe) --------
+          LayoutBuilder(
+            builder: (context, constraints) {
+              // 2 per row on small widths, 3 per row on big widths
+              final w = constraints.maxWidth;
+
+              final show3 = w >= 420; // tablets / large phones
+              final spacing = 10.0;
+
+              final itemWidth = show3
+                  ? (w - (spacing * 2)) / 3
+                  : (w - spacing) / 2;
+
+              return Wrap(
+                spacing: spacing,
+                runSpacing: spacing,
+                children: [
+                  SizedBox(
+                    width: itemWidth,
+                    child: _ActionChip(
+                      icon: Icons.call_rounded,
+                      label: 'Call',
+                      enabled: onCall != null,
+                      onTap: onCall,
+                    ),
                   ),
-                );
-              },
-            ),
+                  SizedBox(
+                    width: itemWidth,
+                    child: _ActionChip(
+                      icon: Icons.message_rounded,
+                      label: 'SMS',
+                      enabled: onSms != null,
+                      onTap: onSms,
+                    ),
+                  ),
+                  SizedBox(
+                    width: itemWidth,
+                    child: _ActionChip(
+                      icon: Icons.chat_bubble_outline,
+                      label: 'WhatsApp',
+                      enabled: onWhatsapp != null,
+                      onTap: onWhatsapp,
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
     );
   }
 }
+
+class _ActionChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool enabled;
+  final VoidCallback? onTap;
+
+  const _ActionChip({
+    required this.icon,
+    required this.label,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        height: 44,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: cs.outlineVariant.withOpacity(0.35)),
+          color: enabled ? cs.surface : cs.surfaceVariant.withOpacity(0.35),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 18,
+              color: enabled ? cs.primary : cs.onSurfaceVariant.withOpacity(0.5),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: enabled
+                      ? cs.primary
+                      : cs.onSurfaceVariant.withOpacity(0.6),
+                ),
+                overflow: TextOverflow.visible,
+                softWrap: false,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Empty / No Results
+// ============================================================================
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              height: 64,
+              width: 64,
+              decoration: BoxDecoration(
+                color: cs.primary.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Icon(Icons.people_alt_outlined, size: 32, color: cs.primary),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'No customers yet',
+              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Tap “Add Customer” to create your first customer.',
+              style: TextStyle(color: cs.onSurfaceVariant),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NoResultsState extends StatelessWidget {
+  final String query;
+  const _NoResultsState({required this.query});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              height: 64,
+              width: 64,
+              decoration: BoxDecoration(
+                color: cs.secondary.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Icon(Icons.search_off, size: 32, color: cs.secondary),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'No results',
+              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              query.isEmpty ? 'Try a different search.' : 'No match for "$query".',
+              style: TextStyle(color: cs.onSurfaceVariant),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Bottom Sheet (your original logic preserved)
+// ============================================================================
 
 class _CustomerFormSheet extends ConsumerStatefulWidget {
   final Customer? customer;
@@ -228,11 +602,9 @@ class _CustomerFormSheetState extends ConsumerState<_CustomerFormSheet> {
 
   bool get isEdit => widget.customer != null;
 
-  // ✅ AppPhoneField state
   late String _phoneE164;
   bool _phoneValid = false;
 
-  // ✅ Image restored
   String? _imagePath;
 
   @override
@@ -243,12 +615,9 @@ class _CustomerFormSheetState extends ConsumerState<_CustomerFormSheet> {
     nameCtrl = TextEditingController(text: c?.name ?? '');
     addressCtrl = TextEditingController(text: c?.address ?? '');
 
-    // mobile stored as E.164 in your app
     _phoneE164 = c?.mobile ?? '';
     _imagePath = c?.imagePath;
 
-    // field will update validity via callback;
-    // we can set a reasonable initial value:
     _phoneValid = _phoneE164.trim().isNotEmpty;
   }
 
@@ -269,9 +638,7 @@ class _CustomerFormSheetState extends ConsumerState<_CustomerFormSheet> {
     setState(() => _imagePath = file.path);
   }
 
-  void _removeImage() {
-    setState(() => _imagePath = null);
-  }
+  void _removeImage() => setState(() => _imagePath = null);
 
   @override
   Widget build(BuildContext context) {
@@ -294,7 +661,7 @@ class _CustomerFormSheetState extends ConsumerState<_CustomerFormSheet> {
         children: [
           Text(
             isEdit ? 'Edit Customer' : 'Add Customer',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 12),
 
@@ -303,9 +670,7 @@ class _CustomerFormSheetState extends ConsumerState<_CustomerFormSheet> {
               CircleAvatar(
                 radius: 26,
                 backgroundImage: hasImage ? FileImage(File(_imagePath!)) : null,
-                child: hasImage
-                    ? null
-                    : const Icon(Icons.person_outline, size: 26),
+                child: hasImage ? null : const Icon(Icons.person_outline, size: 26),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -337,7 +702,6 @@ class _CustomerFormSheetState extends ConsumerState<_CustomerFormSheet> {
           ),
           const SizedBox(height: 10),
 
-          // ✅ PhoneField used instead of TextField (mobile)
           AppPhoneField(
             initialText: _phoneE164,
             label: 'Customer phone *',
@@ -354,7 +718,7 @@ class _CustomerFormSheetState extends ConsumerState<_CustomerFormSheet> {
                 style: TextStyle(
                   color: Theme.of(context).colorScheme.error,
                   fontSize: 12,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
@@ -368,6 +732,8 @@ class _CustomerFormSheetState extends ConsumerState<_CustomerFormSheet> {
               labelText: 'Address (optional)',
               border: OutlineInputBorder(),
             ),
+            minLines: 1,
+            maxLines: 3,
           ),
           const SizedBox(height: 14),
 
@@ -379,7 +745,7 @@ class _CustomerFormSheetState extends ConsumerState<_CustomerFormSheet> {
                 await ref.read(customerListProvider.notifier).upsertCustomer(
                   editing: widget.customer,
                   name: nameCtrl.text.trim(),
-                  mobile: _phoneE164.trim(), // ✅ save E.164
+                  mobile: _phoneE164.trim(),
                   address: addressCtrl.text.trim().isEmpty
                       ? null
                       : addressCtrl.text.trim(),

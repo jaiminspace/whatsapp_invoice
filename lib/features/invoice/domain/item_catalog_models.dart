@@ -1,6 +1,52 @@
 // item_catalog_models.dart
 
-enum UnitType { pcs, kg, litre, meter }
+/// Practical units for invoicing (goods + services)
+enum UnitType {
+  // Count
+  pcs,         // piece
+  nos,         // numbers
+  set,
+  pair,
+  box,
+  pack,
+  dozen,
+
+  // Weight
+  mg,
+  g,
+  kg,
+  ton,
+
+  // Volume
+  ml,
+  litre,
+  gallon,
+
+  // Length
+  mm,
+  cm,
+  meter,
+  km,
+  inch,
+  foot,
+
+  // Area
+  sqFt,
+  sqM,
+
+  // Time / Service
+  min,
+  hour,
+  day,
+  week,
+  month,
+
+  // Bundles / Other
+  bundle,
+  trip,
+  job,
+  service,
+}
 
 class CatalogItem {
   final String id;
@@ -8,7 +54,7 @@ class CatalogItem {
   final double price;
   final UnitType unit;
 
-  /// ✅ NEW: item can belong to multiple businesses
+  /// ✅ item can belong to multiple businesses
   /// If empty => treat as "global item for all businesses"
   final List<String> businessIds;
 
@@ -53,14 +99,36 @@ class CatalogItem {
   factory CatalogItem.fromJson(Map<dynamic, dynamic> json) {
     UnitType parseUnit(dynamic raw) {
       final v = (raw ?? '').toString().trim().toLowerCase();
+
+      // direct name match
       for (final u in UnitType.values) {
         if (u.name.toLowerCase() == v) return u;
       }
+
+      // ✅ optional legacy mappings (if you had old values like "ltr", "pc", etc.)
+      const legacy = <String, UnitType>{
+        'pc': UnitType.pcs,
+        'piece': UnitType.pcs,
+        'pieces': UnitType.pcs,
+        'no': UnitType.nos,
+        'nos': UnitType.nos,
+        'ltr': UnitType.litre,
+        'liter': UnitType.litre,
+        'litre': UnitType.litre,
+        'hrs': UnitType.hour,
+        'hr': UnitType.hour,
+        'mins': UnitType.min,
+        'ft': UnitType.foot,
+        'in': UnitType.inch,
+        'sqft': UnitType.sqFt,
+        'sqm': UnitType.sqM,
+      };
+      if (legacy.containsKey(v)) return legacy[v]!;
+
       return UnitType.pcs; // ✅ backward default
     }
 
     List<String> parseBizIds(dynamic raw) {
-      // new format
       if (raw is List) {
         return raw
             .map((e) => (e ?? '').toString().trim())
@@ -69,11 +137,9 @@ class CatalogItem {
             .toList();
       }
 
-      // ✅ backward compat: old items used `businessId`
       final legacy = (json['businessId'] ?? '').toString().trim();
       if (legacy.isNotEmpty) return [legacy];
 
-      // old global items => global for all
       return <String>[];
     }
 
