@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../features/invoice/domain/item_catalog_models.dart';
 import '../../features/invoice/presentation/pages/businesses_page.dart';
 import '../../features/invoice/presentation/pages/customers_page.dart';
 import '../../features/invoice/presentation/pages/items_page.dart';
+
 import '../../features/invoice/presentation/state/business_list_notifier.dart';
 import '../../features/invoice/presentation/state/catalog_notifier.dart';
 import '../../features/invoice/presentation/state/customer_notifier.dart';
-
 
 class CreateInvoiceGate {
   /// Call this instead of directly opening CreateInvoicePage.
@@ -38,18 +37,11 @@ class _CreateInvoiceGateSheet extends ConsumerWidget {
     final businesses = ref.watch(businessListProvider);
     final customers = ref.watch(customerListProvider);
 
+    // ✅ Catalog is GLOBAL now (not family)
+    final items = ref.watch(catalogProvider);
+
     final hasBusiness = businesses.isNotEmpty;
     final hasCustomers = customers.isNotEmpty;
-
-    // ✅ pick a safe businessId for catalog watch
-    final selectedBusiness = ref.watch(selectedBusinessProvider);
-    final bizId = selectedBusiness?.id ??
-        (businesses.isNotEmpty ? businesses.first.id : '');
-
-    // ✅ IMPORTANT: catalog is per business
-    final items =
-    bizId.isEmpty ? const <CatalogItem>[] : ref.watch(catalogProvider);
-
     final hasItems = items.isNotEmpty;
 
     return Center(
@@ -124,7 +116,7 @@ class _CreateInvoiceGateSheet extends ConsumerWidget {
                   index: 3,
                   title: 'Add Items Catalog (Optional)',
                   subtitle: hasItems
-                      ? 'You have ${items.length} items (for selected business)'
+                      ? 'You have ${items.length} items'
                       : 'Optional, you can add later',
                   done: hasItems,
                   buttonText: hasItems ? 'Manage' : 'Add Items',

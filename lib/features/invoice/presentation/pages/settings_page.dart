@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
@@ -6,14 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 
-import 'businesses_page.dart';
-import 'items_page.dart';
-
-import '../state/business_profile_notifier.dart';
-import '../state/invoice_list_notifier.dart';
-import '../utils/invoice_csv_exporter.dart';
-import '../utils/invoice_csv_importer.dart';
-import '../../domain/business_profile.dart';
+import '../utils/backup_zip_service.dart';
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -23,101 +15,108 @@ class SettingsPage extends ConsumerStatefulWidget {
 }
 
 class _SettingsPageState extends ConsumerState<SettingsPage> {
-  late TextEditingController nameCtrl;
-  late TextEditingController phoneCtrl;
-  late TextEditingController addressCtrl;
-  late TextEditingController upiCtrl;
+  bool _wipeBeforeImport = false;
 
-  @override
-  void initState() {
-    super.initState();
-    final p = ref.read(businessProfileProvider);
-    nameCtrl = TextEditingController(text: p.name);
-    phoneCtrl = TextEditingController(text: p.phone);
-    addressCtrl = TextEditingController(text: p.address);
-    upiCtrl = TextEditingController(text: p.upiId);
-  }
+  Future<void> _exportBackupZip(BuildContext context) async {
+    try {
+      final file = await BackupZipService.exportZipBackup();
 
-  @override
-  void dispose() {
-    nameCtrl.dispose();
-    phoneCtrl.dispose();
-    addressCtrl.dispose();
-    upiCtrl.dispose();
-    super.dispose();
-  }
-
-  Future<void> _exportCsv(BuildContext context) async {
-    final invoices = ref.read(invoiceListProvider);
-    if (invoices.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('No invoices to export')));
-      return;
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'application/zip')],
+        text: 'Snap Invoice Backup',
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Export failed: $e')),
+      );
     }
-
-    final csv = invoicesToCsv(invoices);
-    final bytes = Uint8List.fromList(utf8.encode(csv));
-
-    await Share.shareXFiles([
-      XFile.fromData(bytes,
-          name: 'invoices_export.csv', mimeType: 'text/csv')
-    ]);
   }
 
-  Future<void> _importCsv(BuildContext context) async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['csv'],
-      withData: true,
-    );
+  Future<void> _importBackupZip(BuildContext context) async {
+    try {
+      final res = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['zip'],
+        withData: true,
+      );
+      if (res == null || res.files.isEmpty) return;
 
-    if (result == null || result.files.first.bytes == null) return;
+      final bytes = res.files.first.bytes;
+      if (bytes == null) return;
 
-    final invoices =
-    importInvoicesFromCsvText(utf8.decode(result.files.first.bytes!));
+      final total = await BackupZipService.importZipBackup(
+        zipBytes: Uint8List.fromList(bytes),
+        wipeBeforeImport: _wipeBeforeImport,
+      );
 
-    //await ref.read(invoiceListProvider.notifier).importMany(invoices);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Imported ${invoices.length} invoices')),
-    );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Imported $total records successfully')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Import failed: $e')),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final notifier = ref.read(businessProfileProvider.notifier);
-
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          ListTile(
-            leading: const Icon(Icons.storefront),
-            title: const Text('Manage Businesses'),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const BusinessesPage()),
+          // ✅ Warning card
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.45),
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.warning_amber_rounded),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Backup is important.\n'
+                        'If you uninstall the app or lose your phone, data can be lost.\n'
+                        'Please export backup regularly and store it safely.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+              ],
             ),
           ),
-          ListTile(
-            leading: const Icon(Icons.inventory_2),
-            title: const Text('Manage Items Catalog'),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ItemsPage()),
-            ),
-          ),
+
+          const SizedBox(height: 14),
           const Divider(),
+
           ListTile(
-            leading: const Icon(Icons.download),
-            title: const Text('Export CSV'),
-            onTap: () => _exportCsv(context),
+            leading: const Icon(Icons.archive_outlined),
+            title: const Text('Export Backup (ZIP)'),
+            subtitle: const Text('Includes invoices, customers, businesses, items, logs + images'),
+            onTap: () => _exportBackupZip(context),
           ),
+
+          SwitchListTile(
+            value: _wipeBeforeImport,
+            onChanged: (v) => setState(() => _wipeBeforeImport = v),
+            title: const Text('Wipe existing data before import'),
+            subtitle: const Text('Recommended if restoring to a fresh phone'),
+          ),
+
           ListTile(
-            leading: const Icon(Icons.upload),
-            title: const Text('Import CSV'),
-            onTap: () => _importCsv(context),
+            leading: const Icon(Icons.unarchive_outlined),
+            title: const Text('Import Backup (ZIP)'),
+            subtitle: const Text('Restore app data from a backup zip'),
+            onTap: () => _importBackupZip(context),
           ),
         ],
       ),

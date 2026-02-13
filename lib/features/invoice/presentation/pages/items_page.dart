@@ -1,5 +1,3 @@
-// items_page.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -27,10 +25,23 @@ class _ItemsPageState extends ConsumerState<ItemsPage> {
   @override
   Widget build(BuildContext context) {
     final items = ref.watch(catalogProvider);
+    final businesses = ref.watch(businessListProvider);
 
     final q = _searchCtrl.text.trim().toLowerCase();
-    final filtered =
-    q.isEmpty ? items : items.where((e) => e.name.toLowerCase().contains(q)).toList();
+    final filtered = q.isEmpty
+        ? items
+        : items.where((e) => e.name.toLowerCase().contains(q)).toList();
+
+    String bizLabel(CatalogItem it) {
+      if (it.businessIds.isEmpty) return 'All businesses';
+      if (businesses.isEmpty) return '${it.businessIds.length} businesses';
+      final names = businesses
+          .where((b) => it.businessIds.contains(b.id))
+          .map((b) => b.name.isEmpty ? 'Business' : b.name)
+          .toList();
+      if (names.isEmpty) return '${it.businessIds.length} businesses';
+      return names.join(', ');
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Items (Catalog)')),
@@ -80,22 +91,20 @@ class _ItemsPageState extends ConsumerState<ItemsPage> {
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemBuilder: (context, i) {
                 final it = filtered[i];
-
-                final bizLabel = it.businessIds.isEmpty
-                    ? 'All businesses'
-                    : 'Businesses: ${it.businessIds.length}';
-
                 return ListTile(
                   title: Text(it.name.isEmpty ? 'Item' : it.name),
                   subtitle: Text(
-                    '₹${it.price.toStringAsFixed(2)} • ${it.unit.name.toUpperCase()} • $bizLabel',
+                    '₹${it.price.toStringAsFixed(2)} • ${it.unit.name.toUpperCase()}'
+                        '\nFor: ${bizLabel(it)}',
                   ),
+                  isThreeLine: true,
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
                         tooltip: 'Edit',
-                        onPressed: () => _openAddOrEdit(context, ref, item: it),
+                        onPressed: () =>
+                            _openAddOrEdit(context, ref, item: it),
                         icon: const Icon(Icons.edit_outlined),
                       ),
                       IconButton(
@@ -104,12 +113,15 @@ class _ItemsPageState extends ConsumerState<ItemsPage> {
                           final ok = await AppConfirmDialog.show(
                             context,
                             title: 'Delete item?',
-                            message: 'This will remove "${it.name}".',
+                            message:
+                            'This will remove "${it.name}".',
                             confirmText: 'Delete',
                           );
                           if (!ok) return;
 
-                          await ref.read(catalogProvider.notifier).delete(it.id);
+                          await ref
+                              .read(catalogProvider.notifier)
+                              .delete(it.id);
                         },
                         icon: const Icon(Icons.delete_outline),
                       ),
@@ -140,6 +152,7 @@ class _ItemsPageState extends ConsumerState<ItemsPage> {
 
 class _ItemFormSheet extends ConsumerStatefulWidget {
   final CatalogItem? item;
+
   const _ItemFormSheet({this.item});
 
   @override
@@ -149,21 +162,20 @@ class _ItemFormSheet extends ConsumerStatefulWidget {
 class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
   late final TextEditingController nameCtrl;
   late final TextEditingController priceCtrl;
-  late UnitType unit;
 
-  // ✅ multi-business selection
+  late UnitType unit;
   late Set<String> selectedBizIds;
 
   @override
   void initState() {
     super.initState();
     final it = widget.item;
-
     nameCtrl = TextEditingController(text: it?.name ?? '');
-    priceCtrl = TextEditingController(text: it == null ? '' : it!.price.toStringAsFixed(2));
+    priceCtrl = TextEditingController(
+      text: it == null ? '' : it.price.toStringAsFixed(2),
+    );
     unit = it?.unit ?? UnitType.pcs;
-
-    selectedBizIds = (it?.businessIds ?? <String>[]).toSet();
+    selectedBizIds = {...(it?.businessIds ?? const <String>[])};
   }
 
   @override
@@ -233,22 +245,15 @@ class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
 
           const SizedBox(height: 12),
 
-          // ✅ Business multi-select
+          // ✅ Multi business selection
           Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              'Select Businesses (optional)',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
-            ),
-          ),
-          const SizedBox(height: 6),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              selectedBizIds.isEmpty
-                  ? 'If you select none, item will be available for ALL businesses.'
-                  : 'Selected: ${selectedBizIds.length}',
-              style: Theme.of(context).textTheme.bodySmall,
+              'Available for businesses (optional)',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleSmall
+                  ?.copyWith(fontWeight: FontWeight.w700),
             ),
           ),
           const SizedBox(height: 6),
@@ -256,34 +261,65 @@ class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
           if (businesses.isEmpty)
             const Align(
               alignment: Alignment.centerLeft,
-              child: Text('No businesses added yet. Item will act as global.'),
+              child: Text(
+                'No businesses found. Item will be saved as GLOBAL for all.',
+              ),
             )
           else
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 220),
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: businesses.length,
-                itemBuilder: (context, i) {
-                  final b = businesses[i];
-                  final checked = selectedBizIds.contains(b.id);
-
-                  return CheckboxListTile(
-                    value: checked,
-                    dense: true,
-                    controlAffinity: ListTileControlAffinity.leading,
-                    title: Text(b.name.isEmpty ? 'Business' : b.name),
+            Container(
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .outlineVariant
+                      .withOpacity(0.4),
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  CheckboxListTile(
+                    value: selectedBizIds.isEmpty,
+                    title: const Text('Global (All businesses)'),
+                    subtitle: const Text('If selected, it will appear everywhere'),
                     onChanged: (v) {
                       setState(() {
-                        if (v == true) {
-                          selectedBizIds.add(b.id);
-                        } else {
-                          selectedBizIds.remove(b.id);
-                        }
+                        if (v == true) selectedBizIds.clear();
                       });
                     },
-                  );
-                },
+                  ),
+                  const Divider(height: 1),
+                  ...businesses.map((b) {
+                    final checked = selectedBizIds.contains(b.id);
+                    return CheckboxListTile(
+                      value: checked,
+                      title: Text(b.name.isEmpty ? 'Business' : b.name),
+                      subtitle: Text(b.id),
+                      onChanged: selectedBizIds.isEmpty
+                          ? null // when global, disable individual selection
+                          : (v) {
+                        setState(() {
+                          if (v == true) {
+                            selectedBizIds.add(b.id);
+                          } else {
+                            selectedBizIds.remove(b.id);
+                          }
+                        });
+                      },
+                    );
+                  }).toList(),
+                  if (selectedBizIds.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(12, 0, 12, 12),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Tip: Untick Global by selecting any business first (edit rule).',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
 
@@ -300,21 +336,23 @@ class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
               }
 
               final price = double.tryParse(priceCtrl.text.trim()) ?? 0.0;
+              final bizIds = selectedBizIds.toList();
 
               if (isEdit) {
-                final updated = widget.item!.copyWith(
-                  name: name,
-                  price: price,
-                  unit: unit,
-                  businessIds: selectedBizIds.toList(),
+                await ref.read(catalogProvider.notifier).update(
+                  widget.item!.copyWith(
+                    name: name,
+                    price: price,
+                    unit: unit,
+                    businessIds: bizIds,
+                  ),
                 );
-                await ref.read(catalogProvider.notifier).update(updated);
               } else {
                 await ref.read(catalogProvider.notifier).add(
                   name: name,
                   price: price,
                   unit: unit,
-                  businessIds: selectedBizIds.toList(),
+                  businessIds: bizIds,
                 );
               }
 
@@ -322,7 +360,6 @@ class _ItemFormSheetState extends ConsumerState<_ItemFormSheet> {
             },
             child: Text(isEdit ? 'Save' : 'Add'),
           ),
-
           const SizedBox(height: 8),
         ],
       ),
