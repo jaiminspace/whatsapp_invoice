@@ -290,7 +290,7 @@ class InvoiceDetailPage extends ConsumerWidget {
             onPressed: () async {
               await ref
                   .read(invoiceListProvider.notifier)
-                  .togglePaymentStatus(invoice);
+                  .togglePaymentStatus(invoice.id);
               if (context.mounted) Navigator.pop(context);
             },
             child: Text(

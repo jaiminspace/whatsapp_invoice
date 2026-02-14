@@ -5,15 +5,13 @@ import '../../../../core/ui/app_confirm_dialog.dart';
 import '../../../../core/ui/first_run_setup_sheet.dart';
 
 import '../../domain/invoice_models.dart';
-import '../../domain/item_catalog_models.dart'; // ✅ for CatalogItem
+import '../../domain/item_catalog_models.dart';
 import '../state/invoice_filter_provider.dart';
 import '../state/invoice_list_notifier.dart';
 import '../state/invoice_draft_notifier.dart';
 
 import '../state/customer_notifier.dart';
 import '../state/catalog_notifier.dart';
-
-// ✅ need selected business to pass businessId into catalogProvider(bizId)
 import '../state/business_list_notifier.dart';
 
 import 'create_invoice_page.dart';
@@ -22,8 +20,6 @@ import 'settings_page.dart';
 import 'customers_page.dart';
 import 'businesses_page.dart';
 import 'items_page.dart';
-
-// ✅ change if your file/class name is different
 import 'logs_page.dart';
 
 class InvoiceListPage extends ConsumerStatefulWidget {
@@ -36,14 +32,12 @@ class InvoiceListPage extends ConsumerStatefulWidget {
 class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
   final _searchCtrl = TextEditingController();
 
-  // ✅ ensures FirstRunSetupSheet is checked only once per page lifecycle
   bool _didRunFirstRunSheetCheck = false;
 
   @override
   void initState() {
     super.initState();
 
-    // ✅ IMPORTANT: do NOT run this inside build()
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (_didRunFirstRunSheetCheck) return;
@@ -78,10 +72,11 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
       );
     }
 
-    // ✅ IMPORTANT: force refresh so newly added/edited invoice shows immediately
-    ref.invalidate(invoiceListProvider);
-
-    // ❌ Do NOT reset filters/search/date here.
+    // ✅ FIX: defer invalidate to next frame to avoid "markNeedsBuild during build"
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ref.invalidate(invoiceListProvider);
+    });
   }
 
   Future<void> _openDetail(Invoice inv) async {
@@ -93,11 +88,6 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
 
   @override
   Widget build(BuildContext context) {
-    // ❌ REMOVED from build:
-    // WidgetsBinding.instance.addPostFrameCallback((_) {
-    //   FirstRunSetupSheet.maybeShow(context, ref);
-    // });
-
     final invoices = ref.watch(filteredInvoicesProvider);
 
     final filter = ref.watch(invoiceFilterProvider);
@@ -108,7 +98,6 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
 
     final customers = ref.watch(customerListProvider);
 
-    // ✅ FIX: catalog is now per-business
     final selectedBiz = ref.watch(selectedBusinessProvider);
     final bizId = selectedBiz?.id ?? '';
 
@@ -286,7 +275,7 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
 
             const SizedBox(height: 12),
 
-            // -------------------- Summary chips (AFTER filters) --------------------
+            // -------------------- Summary --------------------
             _SummaryGrid(
               totalPaid: totalPaid,
               totalUnpaid: totalUnpaid,
@@ -324,7 +313,8 @@ class _InvoiceListPageState extends ConsumerState<InvoiceListPage> {
                     );
                     if (!ok) return;
 
-                    await ref.read(invoiceListProvider.notifier).deleteInvoice(inv.id);
+                    // ✅ IMPORTANT: use your notifier delete method name
+                    await ref.read(invoiceListProvider.notifier).delete(inv.id);
                   },
                 ),
               ),
