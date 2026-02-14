@@ -665,32 +665,32 @@ class _CustomerFormSheetState extends ConsumerState<_CustomerFormSheet> {
           ),
           const SizedBox(height: 12),
 
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 26,
-                backgroundImage: hasImage ? FileImage(File(_imagePath!)) : null,
-                child: hasImage ? null : const Icon(Icons.person_outline, size: 26),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _pickImage,
-                  icon: const Icon(Icons.photo_outlined),
-                  label: Text(hasImage ? 'Change photo' : 'Add photo'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              if (hasImage)
-                IconButton(
-                  tooltip: 'Remove photo',
-                  onPressed: _removeImage,
-                  icon: const Icon(Icons.delete_outline),
-                ),
-            ],
-          ),
-
-          const SizedBox(height: 12),
+          // Row(
+          //   children: [
+          //     CircleAvatar(
+          //       radius: 26,
+          //       backgroundImage: hasImage ? FileImage(File(_imagePath!)) : null,
+          //       child: hasImage ? null : const Icon(Icons.person_outline, size: 26),
+          //     ),
+          //     const SizedBox(width: 12),
+          //     Expanded(
+          //       child: OutlinedButton.icon(
+          //         onPressed: _pickImage,
+          //         icon: const Icon(Icons.photo_outlined),
+          //         label: Text(hasImage ? 'Change photo' : 'Add photo'),
+          //       ),
+          //     ),
+          //     const SizedBox(width: 8),
+          //     if (hasImage)
+          //       IconButton(
+          //         tooltip: 'Remove photo',
+          //         onPressed: _removeImage,
+          //         icon: const Icon(Icons.delete_outline),
+          //       ),
+          //   ],
+          // ),
+          //
+          // const SizedBox(height: 12),
 
           TextField(
             controller: nameCtrl,
