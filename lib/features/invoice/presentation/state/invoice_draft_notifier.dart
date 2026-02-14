@@ -76,29 +76,24 @@ class InvoiceDraftNotifier extends Notifier<InvoiceDraft> {
     ensureBusinessIsValid();
   }
 
-  void setCustomerName(String v) =>
-      state = state.copyWith(customerName: v.trim());
+  void setCustomerName(String v) => state = state.copyWith(customerName: v.trim());
 
-  void setCustomerMobile(String v) =>
-      state = state.copyWith(customerMobile: v.trim());
+  void setCustomerMobile(String v) => state = state.copyWith(customerMobile: v.trim());
 
   void setCustomInvoiceNumber(String v) =>
       state = state.copyWith(customInvoiceNumber: v.trim());
 
-  void setInvoiceDateTime(DateTime dt) =>
-      state = state.copyWith(invoiceDateTime: dt);
+  void setInvoiceDateTime(DateTime dt) => state = state.copyWith(invoiceDateTime: dt);
 
   void setBusinessId(String id) {
     final trimmed = id.trim();
     state = state.copyWith(businessId: trimmed);
 
     // ✅ also sync selectedBusinessIdProvider (so next invoice opens with this)
-    ref.read(selectedBusinessIdProvider.notifier).state =
-    trimmed.isEmpty ? null : trimmed;
+    ref.read(selectedBusinessIdProvider.notifier).state = trimmed.isEmpty ? null : trimmed;
   }
 
-  void setInvoiceStatus(PaymentStatus status) =>
-      state = state.copyWith(status: status);
+  void setInvoiceStatus(PaymentStatus status) => state = state.copyWith(status: status);
 
   // ---------- Validation helpers ----------
   bool isValidItem(InvoiceItem it) {
@@ -117,7 +112,7 @@ class InvoiceDraftNotifier extends Notifier<InvoiceDraft> {
 
   List<InvoiceItem> _mergeDuplicateItems(List<InvoiceItem> items) {
     final cleaned = items
-        .where((e) => e.name.trim().isNotEmpty)
+        .where((e) => e.name.trim().isNotEmpty) // ✅ merge only named items
         .map((e) => e.copyWith(name: e.name.trim()))
         .toList();
 
@@ -140,8 +135,15 @@ class InvoiceDraftNotifier extends Notifier<InvoiceDraft> {
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
   }
 
-  void _applyMergedItems() {
-    state = state.copyWith(items: _mergeDuplicateItems(state.items));
+  /// ✅ Apply merge BUT keep empty-name draft rows in UI
+  void _applyMergedItemsKeepingDraftRows() {
+    // keep draft rows (empty name) as-is
+    final drafts = state.items.where((e) => e.name.trim().isEmpty).toList();
+
+    // merge only named items
+    final mergedNamed = _mergeDuplicateItems(state.items);
+
+    state = state.copyWith(items: [...drafts, ...mergedNamed]);
   }
 
   // ---------- Items CRUD ----------
@@ -163,26 +165,44 @@ class InvoiceDraftNotifier extends Notifier<InvoiceDraft> {
   void updateItemName(int index, String v) {
     final updated = [...state.items];
     if (index < 0 || index >= updated.length) return;
+
     updated[index] = updated[index].copyWith(name: v.trim());
     state = state.copyWith(items: updated);
+
+    // ✅ If name is now non-empty, merge safely (won't delete draft rows)
+    if (v.trim().isNotEmpty) {
+      _applyMergedItemsKeepingDraftRows();
+    }
   }
 
   void updateItemPrice(int index, double v) {
     final updated = [...state.items];
     if (index < 0 || index >= updated.length) return;
+
     final safePrice = v < 0 ? 0.0 : v;
     updated[index] = updated[index].copyWith(price: safePrice);
     state = state.copyWith(items: updated);
 
-    // ✅ merge after price update (prevents duplicates)
-    _applyMergedItems();
+    // ✅ IMPORTANT FIX:
+    // Don't merge when name is empty (otherwise that row vanishes)
+    final name = updated[index].name.trim();
+    if (name.isNotEmpty) {
+      _applyMergedItemsKeepingDraftRows();
+    }
   }
 
   void updateItemQty(int index, int v) {
     final updated = [...state.items];
     if (index < 0 || index >= updated.length) return;
+
     final safeQty = v < 1 ? 1 : v;
     updated[index] = updated[index].copyWith(qty: safeQty);
     state = state.copyWith(items: updated);
+
+    // ✅ Optional: merge if named (useful if qty changes should merge)
+    final name = updated[index].name.trim();
+    if (name.isNotEmpty) {
+      _applyMergedItemsKeepingDraftRows();
+    }
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -6,6 +7,7 @@ import '../state/invoice_list_notifier.dart';
 import '../state/customer_notifier.dart';
 
 import '../../../../core/ui/app_confirm_dialog.dart';
+import '../../../../core/ui/app_phone_field.dart'; // ✅ make sure this path matches your project
 import '../../domain/business_profile.dart';
 import '../state/business_profile_notifier.dart';
 
@@ -31,31 +33,79 @@ class CreateInvoicePage extends ConsumerStatefulWidget {
 
 class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
   late final TextEditingController _nameCtrl;
-  late final TextEditingController _mobileCtrl;
   late final TextEditingController _manualInvCtrl;
+
+  // ✅ AppPhoneField state (same behavior as bottom sheets)
+  String _customerPhoneE164 = '';
+  bool _customerPhoneValid = true;
+
+  // ✅ Stable controllers for item rows
+  final List<TextEditingController> _itemNameCtrls = [];
+  final List<TextEditingController> _itemQtyCtrls = [];
+  final List<TextEditingController> _itemPriceCtrls = [];
 
   @override
   void initState() {
     super.initState();
     final draft = ref.read(invoiceDraftProvider);
+
     _nameCtrl = TextEditingController(text: draft.customerName);
-    _mobileCtrl = TextEditingController(text: draft.customerMobile);
     _manualInvCtrl = TextEditingController(text: draft.customInvoiceNumber);
+
+    _customerPhoneE164 = draft.customerMobile;
+    _customerPhoneValid = true;
   }
 
   @override
   void dispose() {
     _nameCtrl.dispose();
-    _mobileCtrl.dispose();
     _manualInvCtrl.dispose();
+
+    for (final c in _itemNameCtrls) c.dispose();
+    for (final c in _itemQtyCtrls) c.dispose();
+    for (final c in _itemPriceCtrls) c.dispose();
+
     super.dispose();
+  }
+
+  void _syncItemControllers(List<InvoiceItem> items) {
+    // Add controllers if items increased
+    while (_itemNameCtrls.length < items.length) {
+      final i = _itemNameCtrls.length;
+
+      _itemNameCtrls.add(TextEditingController(text: items[i].name));
+      _itemQtyCtrls.add(TextEditingController(text: items[i].qty.toString()));
+
+      // ✅ keep raw string (no toFixed) so typing doesn't fight rebuilds
+      final initialPrice = items[i].price == 0 ? '' : items[i].price.toString();
+      _itemPriceCtrls.add(TextEditingController(text: initialPrice));
+    }
+
+    // Remove controllers if items decreased
+    while (_itemNameCtrls.length > items.length) {
+      _itemNameCtrls.removeLast().dispose();
+      _itemQtyCtrls.removeLast().dispose();
+      _itemPriceCtrls.removeLast().dispose();
+    }
   }
 
   void _resetDraft() {
     ref.read(invoiceDraftProvider.notifier).reset();
     _nameCtrl.text = '';
-    _mobileCtrl.text = '';
     _manualInvCtrl.text = '';
+
+    // ✅ reset phone field state
+    setState(() {
+      _customerPhoneE164 = '';
+      _customerPhoneValid = true;
+    });
+
+    for (final c in _itemNameCtrls) c.dispose();
+    for (final c in _itemQtyCtrls) c.dispose();
+    for (final c in _itemPriceCtrls) c.dispose();
+    _itemNameCtrls.clear();
+    _itemQtyCtrls.clear();
+    _itemPriceCtrls.clear();
   }
 
   Future<void> _pickInvoiceDateTime() async {
@@ -109,10 +159,20 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
     notifier.updateItemName(index, selected.name);
     notifier.updateItemPrice(index, selected.price);
 
-    // ✅ IMPORTANT for units later:
-    // notifier.updateItemUnit(index, selected.unit);  // (add this when invoice item supports unit)
+    // ✅ Update controllers text so UI updates immediately
+    if (index >= 0 && index < _itemNameCtrls.length) {
+      _itemNameCtrls[index].text = selected.name;
+      _itemNameCtrls[index].selection = TextSelection.fromPosition(
+        TextPosition(offset: _itemNameCtrls[index].text.length),
+      );
+    }
+    if (index >= 0 && index < _itemPriceCtrls.length) {
+      _itemPriceCtrls[index].text = selected.price.toString();
+      _itemPriceCtrls[index].selection = TextSelection.fromPosition(
+        TextPosition(offset: _itemPriceCtrls[index].text.length),
+      );
+    }
   }
-
 
   // ✅ one save method used by AppBar + bottom button
   Future<void> _saveInvoice() async {
@@ -141,6 +201,14 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
       );
       return;
     }
+
+    // ✅ Optional: validate phone before save (uncomment if you want)
+    // if (!_customerPhoneValid) {
+    //   ScaffoldMessenger.of(context).showSnackBar(
+    //     const SnackBar(content: Text('Enter a valid phone number')),
+    //   );
+    //   return;
+    // }
 
     // ✅ manual mode invoice number required
     final selectedBusiness = ref.read(selectedBusinessProvider);
@@ -222,6 +290,9 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
     final dateStr = DateFormat('dd MMM yyyy, hh:mm a').format(draft.invoiceDateTime);
     final showAddAnother = notifier.hasAtLeastOneValidItem;
 
+    // ✅ Keep item controllers aligned with item count
+    _syncItemControllers(draft.items);
+
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.isEdit ? 'Edit Invoice' : 'Create Invoice'),
@@ -229,7 +300,7 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
           IconButton(
             tooltip: 'Save',
             icon: const Icon(Icons.save),
-            onPressed: _saveInvoice, // ✅ TOP SAVE
+            onPressed: _saveInvoice,
           ),
           IconButton(
             onPressed: _resetDraft,
@@ -321,10 +392,17 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
               if (selected != null) {
                 final name = selected['name'] ?? '';
                 final mobile = selected['mobile'] ?? '';
+
                 notifier.setCustomerName(name);
                 notifier.setCustomerMobile(mobile);
+
                 _nameCtrl.text = name;
-                _mobileCtrl.text = mobile;
+
+                // ✅ sync AppPhoneField like bottom sheets
+                setState(() {
+                  _customerPhoneE164 = mobile;
+                  _customerPhoneValid = true;
+                });
               }
             },
           ),
@@ -356,15 +434,31 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
           ),
           const SizedBox(height: 12),
 
-          TextField(
-            controller: _mobileCtrl,
-            decoration: const InputDecoration(
-              labelText: 'Customer / Client mobile',
-              border: OutlineInputBorder(),
-            ),
-            keyboardType: TextInputType.phone,
-            onChanged: notifier.setCustomerMobile,
+          // ✅ Customer phone field (same as your bottom sheets)
+          AppPhoneField(
+            initialText: _customerPhoneE164,
+            label: 'Customer / Client mobile *',
+            onChangedE164: (v) {
+              _customerPhoneE164 = v;
+              notifier.setCustomerMobile(v);
+            },
+            onValidChanged: (ok) => setState(() => _customerPhoneValid = ok),
           ),
+
+          if (!_customerPhoneValid) ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Enter a valid phone number',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.error,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
 
           const SizedBox(height: 18),
 
@@ -372,10 +466,14 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Items',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+              const Text(
+                'Items',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
               FilledButton.icon(
-                onPressed: notifier.addItem,
+                onPressed: () {
+                  notifier.addItem();
+                },
                 icon: const Icon(Icons.add),
                 label: const Text('Add item'),
               ),
@@ -393,6 +491,10 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
           ...List.generate(draft.items.length, (index) {
             final item = draft.items[index];
 
+            final nameCtrl = _itemNameCtrls[index];
+            final qtyCtrl = _itemQtyCtrls[index];
+            final priceCtrl = _itemPriceCtrls[index];
+
             return Card(
               margin: const EdgeInsets.only(bottom: 10),
               child: Padding(
@@ -403,20 +505,28 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
                       children: [
                         Expanded(
                           child: TextField(
+                            controller: nameCtrl,
                             decoration: const InputDecoration(
                               labelText: 'Item name *',
                               border: OutlineInputBorder(),
                             ),
-                            controller: TextEditingController(text: item.name)
-                              ..selection = TextSelection.fromPosition(
-                                TextPosition(offset: item.name.length),
-                              ),
                             onChanged: (v) => notifier.updateItemName(index, v),
                           ),
                         ),
                         const SizedBox(width: 8),
                         IconButton(
-                          onPressed: () => notifier.removeItem(index),
+                          onPressed: () {
+                            notifier.removeItem(index);
+
+                            // ✅ Keep controllers in sync immediately
+                            if (index < _itemNameCtrls.length) {
+                              _itemNameCtrls.removeAt(index).dispose();
+                              _itemQtyCtrls.removeAt(index).dispose();
+                              _itemPriceCtrls.removeAt(index).dispose();
+                            }
+
+                            setState(() {});
+                          },
                           icon: const Icon(Icons.delete_outline),
                         ),
                       ],
@@ -438,46 +548,52 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
                       children: [
                         Expanded(
                           child: TextField(
+                            controller: qtyCtrl,
                             decoration: const InputDecoration(
                               labelText: 'Qty *',
                               border: OutlineInputBorder(),
                             ),
                             keyboardType: TextInputType.number,
-                            controller:
-                            TextEditingController(text: item.qty.toString())
-                              ..selection = TextSelection.fromPosition(
-                                TextPosition(
-                                  offset: item.qty.toString().length,
-                                ),
-                              ),
-                            onChanged: (v) => notifier.updateItemQty(
-                              index,
-                              int.tryParse(v) ?? 1,
-                            ),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(6),
+                            ],
+                            onChanged: (v) {
+                              final parsed = int.tryParse(v);
+                              notifier.updateItemQty(index, parsed ?? 1);
+                            },
                           ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: TextField(
+                            controller: priceCtrl,
                             decoration: const InputDecoration(
                               labelText: 'Price',
                               border: OutlineInputBorder(),
                               prefixText: '₹ ',
                             ),
-                            keyboardType: const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            controller: TextEditingController(
-                              text: item.price.toStringAsFixed(2),
-                            )..selection = TextSelection.fromPosition(
-                              TextPosition(
-                                offset: item.price.toStringAsFixed(2).length,
-                              ),
-                            ),
-                            onChanged: (v) => notifier.updateItemPrice(
-                              index,
-                              double.tryParse(v) ?? 0.0,
-                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}$')),
+                            ],
+                            onChanged: (v) {
+                              final cleaned = v.trim();
+
+                              if (cleaned.isEmpty) {
+                                notifier.updateItemPrice(index, 0.0);
+                                return;
+                              }
+
+                              if (cleaned == '.' || cleaned.endsWith('.')) {
+                                return;
+                              }
+
+                              final parsed = double.tryParse(cleaned);
+                              if (parsed == null) return;
+
+                              notifier.updateItemPrice(index, parsed);
+                            },
                           ),
                         ),
                       ],
@@ -504,7 +620,9 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
-                onPressed: notifier.addItem,
+                onPressed: () {
+                  notifier.addItem();
+                },
                 icon: const Icon(Icons.add),
                 label: const Text('Add another item'),
               ),
@@ -519,15 +637,14 @@ class _CreateInvoicePageState extends ConsumerState<CreateInvoicePage> {
               title: const Text('Grand Total'),
               trailing: Text(
                 '₹${draft.grandTotal.toStringAsFixed(2)}',
-                style:
-                const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ),
           ),
 
           const SizedBox(height: 16),
 
-          // BOTTOM SAVE (keep it)
+          // BOTTOM SAVE
           FilledButton(
             onPressed: _saveInvoice,
             child: Text(widget.isEdit ? 'Update Invoice' : 'Save Invoice'),
@@ -593,18 +710,13 @@ class _CatalogPickerSheetState extends ConsumerState<_CatalogPickerSheet> {
   Widget build(BuildContext context) {
     final all = ref.watch(catalogProvider);
 
-    // ✅ Filter items for selected business:
-    // - if item.businessIds is empty => global for all
-    // - else must contain selected bizId
     final visible = all.where((it) {
       if (it.businessIds.isEmpty) return true;
       return it.businessIds.contains(widget.bizId);
     }).toList();
 
     final q = _searchCtrl.text.trim().toLowerCase();
-    final list = q.isEmpty
-        ? visible
-        : visible.where((e) => e.name.toLowerCase().contains(q)).toList();
+    final list = q.isEmpty ? visible : visible.where((e) => e.name.toLowerCase().contains(q)).toList();
 
     return SafeArea(
       child: Padding(
@@ -664,5 +776,3 @@ class _CatalogPickerSheetState extends ConsumerState<_CatalogPickerSheet> {
     );
   }
 }
-
-
